@@ -17,6 +17,7 @@ import mathutils
 import struct
 from bpy_extras.io_utils import ImportHelper
 from math import pi, sin, cos
+import os.path
 
 
 def read_struct_from_file(file, fmt):
@@ -60,26 +61,58 @@ def read_tag(ctx, i, file):
     tag.rotation_euler = mx.to_euler()
 
 
+def guess_texture_filepath(modelpath, imagepath):
+    modelpath = os.path.normpath(os.path.normcase(modelpath))
+    modeldir, _ = os.path.split(modelpath)
+    imagedir, imagename = os.path.split(os.path.normpath(os.path.normcase(imagepath)))
+    ip = imagedir
+    while ip:
+        if ip in modeldir:
+            pos = modeldir.rfind(ip)
+            yield os.path.join(modeldir[:pos + len(ip)], imagedir[len(ip):], imagename)
+        ip, _ = os.path.split(ip)
+    yield os.path.join(modeldir, imagename)
+
+
 def read_surface_shader(ctx, i, file):
     name, index = read_struct_from_file(file, '<64si')
-    print('shader {} {}'.format(name, index))
-    # TODO: add textures
+    name = cleanup_string(name)
+    for fname in guess_texture_filepath(ctx['filename'], name):
+        if os.path.isfile(fname):
+            image = bpy.data.images.load(fname)
+
+            texture = bpy.data.textures.new('Texture{}'.format(index), 'IMAGE')
+            texture.image = image
+
+            texture_slot = ctx['material'].texture_slots.create(i)
+            texture_slot.uv_layer = 'UVMap'
+            texture_slot.use = True
+            texture_slot.texture_coords = 'UV'
+            texture_slot.texture = texture
+            break
 
 
 def read_surface_triangle(ctx, i, file):
     a, b, c = read_struct_from_file(file, '<3i')
     ls = i * 3
     ctx['mesh'].loops[ls].vertex_index = a
-    ctx['mesh'].loops[ls + 1].vertex_index = b
-    ctx['mesh'].loops[ls + 2].vertex_index = c
+    ctx['mesh'].loops[ls + 1].vertex_index = c  # swapped
+    ctx['mesh'].loops[ls + 2].vertex_index = b  # swapped
     ctx['mesh'].polygons[i].loop_start = ls
     ctx['mesh'].polygons[i].loop_total = 3
 
 
 def read_surface_ST(ctx, i, file):
     s, t = read_struct_from_file(file, '<ff')
-    #ctx['mesh'].vertices[i].
-    # TODO: add texture coords
+    # store in context, these values used more than once
+    ctx['uv'].append((s, 1.0 - t))  # inverted t
+
+
+def make_surface_UV_map(ctx):
+    for poly in ctx['mesh'].polygons:
+        for i in range(poly.loop_start, poly.loop_start + poly.loop_total):
+            vidx = ctx['mesh'].loops[i].vertex_index
+            ctx['uvdata'][i].uv = ctx['uv'][vidx]
 
 
 def decode_normal(b):
@@ -115,21 +148,33 @@ def read_surface(ctx, i, file):
     ctx['mesh'].polygons.add(count=nTris)
     ctx['mesh'].loops.add(count=nTris*3)
 
-    read_n_items(ctx, file, nShaders, start_pos + offShaders, read_surface_shader)
     read_n_items(ctx, file, nTris, start_pos + offTris, read_surface_triangle)
-    read_n_items(ctx, file, nVerts, start_pos + offST, read_surface_ST)
 
     ctx['verts'] = ctx['mesh'].vertices
     read_n_items(ctx, file, nVerts, start_pos + offVerts, read_surface_vert)
 
     ctx['mesh'].update(calc_edges=True)
     ctx['mesh'].validate()
+
+    ctx['material'] = bpy.data.materials.new('Main')
+    ctx['mesh'].materials.append(ctx['material'])
+    ctx['material'].use_shadeless = True
+
+    ctx['mesh'].uv_textures.new('UVMap')
+    ctx['uv'] = []
+    read_n_items(ctx, file, nVerts, start_pos + offST, read_surface_ST)
+    ctx['uvdata'] = ctx['mesh'].uv_layers['UVMap'].data
+    make_surface_UV_map(ctx)
+
+    read_n_items(ctx, file, nShaders, start_pos + offShaders, read_surface_shader)
+
     obj = bpy.data.objects.new(cleanup_string(name), ctx['mesh'])
     ctx['context'].scene.objects.link(obj)
 
     if nFrames > 1:
         obj.shape_key_add(name=ctx['frameName0'])  # adding first frame, which is already loaded
         ctx['mesh'].shape_keys.use_relative = False
+        # TODO: check MD3 has linear frame interpolation
         for frame in range(1, nFrames):  # first frame skipped
             shape_key = obj.shape_key_add(name=ctx['frameName{}'.format(frame)])
             ctx['verts'] = shape_key.data
@@ -154,6 +199,7 @@ def importMD3(context, filename):
         assert version == 15
         ctx['context'] = context
         ctx['modelFrames'] = nFrames
+        ctx['filename'] = filename
 
         read_n_items(ctx, file, nFrames, offFrames, read_frame)
         read_n_items(ctx, file, nTags, offTags, read_tag)
