@@ -1,5 +1,8 @@
 # This script is licensed as public domain.
 
+# TODO: guess matrix moved parts of meshes
+# TODO: 0th frame is just a copy of 1st
+
 bl_info = {
     "name": "Import Quake 3 Model (.md3)",
     "author": "Vitalik Verhovodov",
@@ -58,18 +61,20 @@ def read_tag(ctx, i, file):
     mx = mathutils.Matrix()
     for j in range(3):
         mx[j].xyz = o[j]
-    tag.rotation_euler = mx.to_euler()
+    tag.rotation_euler = mx.to_euler()  # TODO: use tag.matrix_basis?
 
 
 def guess_texture_filepath(modelpath, imagepath):
     modelpath = os.path.normpath(os.path.normcase(modelpath))
     modeldir, _ = os.path.split(modelpath)
     imagedir, imagename = os.path.split(os.path.normpath(os.path.normcase(imagepath)))
+    previp = None
     ip = imagedir
-    while ip:
+    while ip != previp:
         if ip in modeldir:
             pos = modeldir.rfind(ip)
             yield os.path.join(modeldir[:pos + len(ip)], imagedir[len(ip):], imagename)
+        previp = ip
         ip, _ = os.path.split(ip)
     yield os.path.join(modeldir, imagename)
 
@@ -190,20 +195,24 @@ def read_surface(ctx, i, file):
 
 
 def importMD3(context, filename):
-    ctx = {}
     with open(filename, 'rb') as file:
         magic, version, modelname, flags, nFrames, nTags, nSurfaces,\
         nSkins, offFrames, offTags, offSurfaces, offEnd\
             = read_struct_from_file(file, '<4si64siiiiiiiii')
         assert magic == b'IDP3'
         assert version == 15
-        ctx['context'] = context
-        ctx['modelFrames'] = nFrames
-        ctx['filename'] = filename
+        ctx = {'context': context, 'modelFrames': nFrames, 'filename': filename}
+
+        bpy.ops.scene.new()
+        context.scene.name = cleanup_string(modelname)
+        context.scene.frame_start = 0
+        context.scene.frame_end = nFrames
 
         read_n_items(ctx, file, nFrames, offFrames, read_frame)
         read_n_items(ctx, file, nTags, offTags, read_tag)
         read_n_items(ctx, file, nSurfaces, offSurfaces, read_surface)
+
+        context.scene.frame_set(0)
 
 
 class ImportMD3(bpy.types.Operator, ImportHelper):
