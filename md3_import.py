@@ -177,19 +177,19 @@ def read_surface(ctx, i, file):
     ctx['context'].scene.objects.link(obj)
 
     if nFrames > 1:
-        obj.shape_key_add(name=ctx['frameName0'])  # adding first frame, which is already loaded
+        obj.shape_key_add(name=ctx['frameName0'] + 'first')  # adding first frame, which is already loaded
         ctx['mesh'].shape_keys.use_relative = False
         # TODO: check MD3 has linear frame interpolation
         for frame in range(1, nFrames):  # first frame skipped
             shape_key = obj.shape_key_add(name=ctx['frameName{}'.format(frame)])
             ctx['verts'] = shape_key.data
             read_n_items(ctx, file, nVerts, start_pos + offVerts + frame * vert_size * nVerts, read_surface_vert)
-        for frame in range(nFrames + 1):
-            ctx['mesh'].shape_keys.eval_time = 10.0 * frame
-            ctx['mesh'].shape_keys.keyframe_insert('eval_time', frame=frame)
         bpy.context.scene.objects.active = obj
         bpy.context.object.active_shape_key_index = 0
         bpy.ops.object.shape_key_retime()
+        for frame in range(nFrames):
+            ctx['mesh'].shape_keys.eval_time = 10.0 * (frame + 1)
+            ctx['mesh'].shape_keys.keyframe_insert('eval_time', frame=frame)
 
     file.seek(start_pos + offEnd)
 
@@ -206,7 +206,7 @@ def importMD3(context, filename):
         bpy.ops.scene.new()
         context.scene.name = cleanup_string(modelname)
         context.scene.frame_start = 0
-        context.scene.frame_end = nFrames
+        context.scene.frame_end = nFrames - 1
 
         read_n_items(ctx, file, nFrames, offFrames, read_frame)
         read_n_items(ctx, file, nTags, offTags, read_tag)
