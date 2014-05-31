@@ -2,7 +2,6 @@
 
 # grouping to surfaces must done by UV maps
 # TODO: merge surfaces with same uv maps and texture
-# TODO: smoothing groups
 
 bl_info = {
     "name": "Export Quake 3 Model (.md3)",
@@ -98,6 +97,22 @@ def gather_shader_info(mesh):
         return uv_maps[0]
 
 
+def gather_vertices(mesh):
+    md3vert_to_loop_map = []
+    loop_to_md3vert_map = []
+    index = {}
+    for i, loop in enumerate(mesh.loops):
+        key = (loop.vertex_index, tuple(loop.normal))
+        md3id = index.get(key, None)
+        if md3id is None:
+            md3id = len(md3vert_to_loop_map)
+            index[key] = md3id
+            md3vert_to_loop_map.append(i)
+        loop_to_md3vert_map.append(md3id)
+
+    return md3vert_to_loop_map, loop_to_md3vert_map
+
+
 def write_surface_shader(ctx, i, file):
     filename = ctx['mesh_shader_list'][i]
     # TODO: cut filename to quake path
@@ -108,17 +123,17 @@ def write_surface_shader(ctx, i, file):
 def write_surface_triangle(ctx, i, file):
     assert ctx['mesh'].polygons[i].loop_total == 3
     start = ctx['mesh'].polygons[i].loop_start
-    a, c, b = (ctx['mesh'].loops[j].vertex_index for j in range(start, start + 3))  # swapped c/b
+    a, c, b = (ctx['mesh_loop_to_md3vert'][j] for j in range(start, start + 3))  # swapped c/b
     write_struct_to_file(file, '<3i', (a, b, c))
-
-    for j in range(start, start + 3):
-        ctx['mesh_loop_idx'][ctx['mesh'].loops[j].vertex_index] = j
 
 
 def write_surface_ST(ctx, i, file):
-    loop_idx = ctx['mesh_loop_idx'][i]
-    s, t = ctx['mesh'].uv_layers[ctx['mesh_uvmap_name']].data[loop_idx].uv
-    t = 1.0 - t  # inverted t
+    if ctx['mesh_uvmap_name'] is None:
+        s, t = 0.0, 0.0
+    else:
+        loop_idx = ctx['mesh_md3vert_to_loop'][i]
+        s, t = ctx['mesh'].uv_layers[ctx['mesh_uvmap_name']].data[loop_idx].uv
+        t = 1.0 - t  # inverted t
     write_struct_to_file(file, '<ff', (s, t))
 
 
@@ -228,20 +243,29 @@ def encode_normal(n):
 
 
 def write_surface_vert(ctx, frame, i, file):
-    x, y, z = [int(v * 64) for v in get_evaluated_vertex_co(ctx, frame, i)]
-    n = encode_normal(ctx['mesh'].vertices[i].normal)
+    loop_id = ctx['mesh_md3vert_to_loop'][i]
+    vert_id = ctx['mesh'].loops[loop_id].vertex_index
+    x, y, z = [int(v * 64) for v in get_evaluated_vertex_co(ctx, frame, vert_id)]
+    n = encode_normal(ctx['mesh'].loops[loop_id].normal)
     write_struct_to_file(file, '<hhh2s', (x, y, z, n))
 
 
 def write_surface(ctx, i, file):
     surfaceOffset = file.tell()
-    ctx['mesh'] = bpy.context.scene.objects[ctx['surfNames'][i]].data
+
+    obj = bpy.context.scene.objects[ctx['surfNames'][i]]
+    bpy.context.scene.objects.active = obj
+    bpy.ops.object.modifier_add(type='TRIANGULATE')
+    ctx['mesh'] = obj.to_mesh(bpy.context.scene, True, 'PREVIEW', calc_tessface=True)
+    bpy.ops.object.modifier_remove(modifier=obj.modifiers[-1].name)
+    ctx['mesh'].calc_normals_split()
+
     ctx['mesh_uvmap_name'], ctx['mesh_shader_list'] = gather_shader_info(ctx['mesh'])
-    ctx['mesh_loop_idx'] = {}
+    ctx['mesh_md3vert_to_loop'], ctx['mesh_loop_to_md3vert'] = gather_vertices(ctx['mesh'])
     ctx['mesh_vco'] = {}
     nShaders = len(ctx['mesh_shader_list'])
-    nVerts = len(ctx['mesh'].vertices)  # TODO: flat shading vertex copies
-    nTris = len(ctx['mesh'].polygons)  # TODO: quads, any other polygons
+    nVerts = len(ctx['mesh_md3vert_to_loop'])
+    nTris = len(ctx['mesh'].polygons)
 
     write_struct_to_file(file, '<4s64siiiii', (
         b'IDP3',
