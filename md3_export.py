@@ -2,6 +2,7 @@
 
 # grouping to surfaces must done by UV maps
 # TODO: merge surfaces with same uv maps and texture
+# TODO: add assertions on maxcounts (vertex, tris, etc)
 
 bl_info = {
     "name": "Export Quake 3 Model (.md3)",
@@ -165,6 +166,10 @@ def _dict_remove(d, key):
 def surface_start_frame(ctx, i, file):
     bpy.context.scene.frame_set(i)
 
+    obj = bpy.context.scene.objects.active
+    ctx['mesh'] = obj.to_mesh(bpy.context.scene, True, 'PREVIEW')
+    ctx['mesh'].calc_normals_split()
+
     ctx['mesh_vco'][i] = ctx['mesh_vco'].get(i, [])
 
     _dict_remove(ctx, 'mesh_sk_rel')
@@ -189,7 +194,7 @@ def surface_start_frame(ctx, i, file):
 
 
 def surface_end_frame(ctx, i, file):
-    pass
+    ctx['mesh'].free_normals_split()
 
 
 def post_process_frame(ctx, i, file):
@@ -256,8 +261,8 @@ def write_surface(ctx, i, file):
     obj = bpy.context.scene.objects[ctx['surfNames'][i]]
     bpy.context.scene.objects.active = obj
     bpy.ops.object.modifier_add(type='TRIANGULATE')
-    ctx['mesh'] = obj.to_mesh(bpy.context.scene, True, 'PREVIEW', calc_tessface=True)
-    bpy.ops.object.modifier_remove(modifier=obj.modifiers[-1].name)
+
+    ctx['mesh'] = obj.to_mesh(bpy.context.scene, True, 'PREVIEW')
     ctx['mesh'].calc_normals_split()
 
     ctx['mesh_uvmap_name'], ctx['mesh_shader_list'] = gather_shader_info(ctx['mesh'])
@@ -269,7 +274,7 @@ def write_surface(ctx, i, file):
 
     write_struct_to_file(file, '<4s64siiiii', (
         b'IDP3',
-        ctx['mesh'].name.encode('utf-8'),
+        obj.name.encode('utf-8'),
         0,  # flags, ignored
         ctx['modelFrames'],  # nFrames
         nShaders, nVerts, nTris
@@ -288,8 +293,13 @@ def write_surface(ctx, i, file):
     resolve_delayed(ctx, file, 'surf_offST', (file.tell() - surfaceOffset,))
     write_n_items(ctx, file, nVerts, write_surface_ST)
     resolve_delayed(ctx, file, 'surf_offVerts', (file.tell() - surfaceOffset,))
+
+    ctx['mesh'].free_normals_split()
+
     write_nm_items(ctx, file, ctx['modelFrames'], nVerts, write_surface_vert, surface_start_frame, surface_end_frame)
     resolve_delayed(ctx, file, 'surf_offEnd', (file.tell() - surfaceOffset,))
+
+    bpy.ops.object.modifier_remove(modifier=obj.modifiers[-1].name)
 
 
 def exportMD3(context, filename):
