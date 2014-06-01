@@ -1,7 +1,8 @@
 # This script is licensed as public domain.
 
-# TODO: guess matrix moved parts of meshes
-# TODO: 0th frame is just a copy of 1st
+# TODO: different normals for shape keys
+# TODO: merge vertices near sharp edges (there is a disconnected surface now)
+# TODO: use_smooth=False for flat faces (all vertex normal equal)
 
 bl_info = {
     "name": "Import Quake 3 Model (.md3)",
@@ -105,6 +106,7 @@ def read_surface_triangle(ctx, i, file):
     ctx['mesh'].loops[ls + 2].vertex_index = b  # swapped
     ctx['mesh'].polygons[i].loop_start = ls
     ctx['mesh'].polygons[i].loop_total = 3
+    ctx['mesh'].polygons[i].use_smooth = True
 
 
 def read_surface_ST(ctx, i, file):
@@ -133,8 +135,11 @@ vert_size = struct.calcsize('<hhh2s')
 def read_surface_vert(ctx, i, file):
     x, y, z, n = read_struct_from_file(file, '<hhh2s')
     ctx['verts'][i].co = mathutils.Vector((x / 64.0, y / 64.0, z / 64.0))
-    if hasattr(ctx['verts'][i], 'normal'):
-        ctx['verts'][i].normal = mathutils.Vector(decode_normal(n))
+
+
+def read_surface_normals(ctx, i, file):
+    x, y, z, n = read_struct_from_file(file, '<hhh2s')
+    ctx['verts'][i].normal = mathutils.Vector(decode_normal(n))
 
 
 def read_surface(ctx, i, file):
@@ -155,15 +160,18 @@ def read_surface(ctx, i, file):
 
     read_n_items(ctx, file, nTris, start_pos + offTris, read_surface_triangle)
 
+    ctx['test_normals'] = {}
     ctx['verts'] = ctx['mesh'].vertices
     read_n_items(ctx, file, nVerts, start_pos + offVerts, read_surface_vert)
 
     ctx['mesh'].update(calc_edges=True)
     ctx['mesh'].validate()
 
+    # separate step for normals. update() causes recalculation
+    read_n_items(ctx, file, nVerts, start_pos + offVerts, read_surface_normals)
+
     ctx['material'] = bpy.data.materials.new('Main')
     ctx['mesh'].materials.append(ctx['material'])
-    ctx['material'].use_shadeless = True
 
     ctx['mesh'].uv_textures.new('UVMap')
     ctx['uv'] = []
@@ -213,6 +221,7 @@ def importMD3(context, filename):
         read_n_items(ctx, file, nSurfaces, offSurfaces, read_surface)
 
         context.scene.frame_set(0)
+        context.scene.game_settings.material_mode = 'GLSL'
 
 
 class ImportMD3(bpy.types.Operator, ImportHelper):
