@@ -164,7 +164,7 @@ def _dict_remove(d, key):
 
 
 def surface_start_frame(ctx, i, file):
-    bpy.context.scene.frame_set(i)
+    bpy.context.scene.frame_set(bpy.context.scene.frame_start + i)
 
     obj = bpy.context.scene.objects.active
     ctx['mesh_matrix'] = obj.matrix_world
@@ -286,7 +286,7 @@ def write_surface(ctx, i, file):
     write_delayed(ctx, file, 'surf_offVerts', '<i', (0,))
     write_delayed(ctx, file, 'surf_offEnd', '<i', (0,))
 
-    bpy.context.scene.frame_set(0)
+    bpy.context.scene.frame_set(bpy.context.scene.frame_start)
     resolve_delayed(ctx, file, 'surf_offShaders', (file.tell() - surfaceOffset,))
     write_n_items(ctx, file, nShaders, write_surface_shader)
     resolve_delayed(ctx, file, 'surf_offTris', (file.tell() - surfaceOffset,))
