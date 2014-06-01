@@ -66,6 +66,7 @@ def read_tag(ctx, i, file):
 
 
 def guess_texture_filepath(modelpath, imagepath):
+    fileexts = ('', '.png', '.tga', '.jpg', '.jpeg')
     modelpath = os.path.normpath(os.path.normcase(modelpath))
     modeldir, _ = os.path.split(modelpath)
     imagedir, imagename = os.path.split(os.path.normpath(os.path.normcase(imagepath)))
@@ -74,27 +75,31 @@ def guess_texture_filepath(modelpath, imagepath):
     while ip != previp:
         if ip in modeldir:
             pos = modeldir.rfind(ip)
-            yield os.path.join(modeldir[:pos + len(ip)], imagedir[len(ip):], imagename)
+            nameguess = os.path.join(modeldir[:pos + len(ip)], imagedir[len(ip):], imagename)
+            for ext in fileexts:
+                yield nameguess + ext
         previp = ip
         ip, _ = os.path.split(ip)
-    yield os.path.join(modeldir, imagename)
+    nameguess = os.path.join(modeldir, imagename)
+    for ext in fileexts:
+        yield nameguess + ext
 
 
 def read_surface_shader(ctx, i, file):
     name, index = read_struct_from_file(file, '<64si')
     name = cleanup_string(name)
+
+    texture = bpy.data.textures.new(name, 'IMAGE')
+    texture_slot = ctx['material'].texture_slots.create(i)
+    texture_slot.uv_layer = 'UVMap'
+    texture_slot.use = True
+    texture_slot.texture_coords = 'UV'
+    texture_slot.texture = texture
+
     for fname in guess_texture_filepath(ctx['filename'], name):
         if os.path.isfile(fname):
             image = bpy.data.images.load(fname)
-
-            texture = bpy.data.textures.new('Texture{}'.format(index), 'IMAGE')
             texture.image = image
-
-            texture_slot = ctx['material'].texture_slots.create(i)
-            texture_slot.uv_layer = 'UVMap'
-            texture_slot.use = True
-            texture_slot.texture_coords = 'UV'
-            texture_slot.texture = texture
             break
 
 
@@ -222,6 +227,8 @@ def importMD3(context, filename):
 
         context.scene.frame_set(0)
         context.scene.game_settings.material_mode = 'GLSL'
+
+        bpy.ops.object.lamp_add(type='SUN')
 
 
 class ImportMD3(bpy.types.Operator, ImportHelper):

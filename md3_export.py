@@ -86,7 +86,7 @@ def gather_shader_info(mesh):
                 uv_maps[uv_map_name] = []
             if not texture_slot.texture or texture_slot.texture.type != 'IMAGE':
                 continue
-            uv_maps[uv_map_name].append(texture_slot.texture.image.filepath)
+            uv_maps[uv_map_name].append(texture_slot.texture.name)
     uv_maps = [(k, v) for k, v in uv_maps.items()]
     if len(uv_maps) <= 0:
         print('Warning: No applicable shaders found')
