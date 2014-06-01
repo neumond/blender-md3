@@ -167,6 +167,8 @@ def surface_start_frame(ctx, i, file):
     bpy.context.scene.frame_set(i)
 
     obj = bpy.context.scene.objects.active
+    ctx['mesh_matrix'] = obj.matrix_world
+    ctx['mesh_location'] = obj.location
     ctx['mesh'] = obj.to_mesh(bpy.context.scene, True, 'PREVIEW')
     ctx['mesh'].calc_normals_split()
 
@@ -174,8 +176,6 @@ def surface_start_frame(ctx, i, file):
 
     _dict_remove(ctx, 'mesh_sk_rel')
     _dict_remove(ctx, 'mesh_sk_abs')
-    # TODO: bones
-    # TODO: object matrix
 
     shape_keys = ctx['mesh'].shape_keys
     if shape_keys is not None:
@@ -234,6 +234,7 @@ def get_evaluated_vertex_co(ctx, frame, i):
         a, b, t = ctx['mesh_sk_abs']
         co = interp(kbs[a].data[i].co, kbs[b].data[i].co, t)
 
+    co = co * ctx['mesh_matrix'] + ctx['mesh_location']
     ctx['mesh_vco'][frame].append(co)
     return co
 
@@ -250,7 +251,7 @@ def encode_normal(n):
 def write_surface_vert(ctx, frame, i, file):
     loop_id = ctx['mesh_md3vert_to_loop'][i]
     vert_id = ctx['mesh'].loops[loop_id].vertex_index
-    x, y, z = [int(v * 64) for v in get_evaluated_vertex_co(ctx, frame, vert_id)]
+    x, y, z = [int(v * 64.0) for v in get_evaluated_vertex_co(ctx, frame, vert_id)]
     n = encode_normal(ctx['mesh'].loops[loop_id].normal)
     write_struct_to_file(file, '<hhh2s', (x, y, z, n))
 
