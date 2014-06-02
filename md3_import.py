@@ -29,7 +29,7 @@ def read_struct_from_file(file, fmt):
 
 
 def cleanup_string(b):
-    return b.rstrip(b'\0').decode('utf-8')
+    return b.replace(b'\0', b'').decode('utf-8')
 
 
 def read_n_items(ctx, file, n, offset, func):

@@ -21,6 +21,14 @@ import mathutils
 import struct
 from bpy_extras.io_utils import ExportHelper
 from math import atan2, acos, pi, sqrt
+import re
+
+
+nums = re.compile(r'\.\d{3}$')
+def prepare_name(name):
+    if nums.findall(name):
+        return name[:-4]  # cut off blender's .001 .002 etc
+    return name
 
 
 def write_struct_to_file(file, fmt, data):
@@ -70,7 +78,7 @@ def write_tag(ctx, i, file):
     ox = tuple(tag.matrix_basis[0][:3])
     oy = tuple(tag.matrix_basis[1][:3])
     oz = tuple(tag.matrix_basis[2][:3])
-    write_struct_to_file(file, '<64s12f', (tag.name.encode('utf-8'),) + origin + ox + oy + oz)
+    write_struct_to_file(file, '<64s12f', (prepare_name(tag.name).encode('utf-8'),) + origin + ox + oy + oz)
 
 
 def gather_shader_info(mesh):
@@ -86,7 +94,7 @@ def gather_shader_info(mesh):
                 uv_maps[uv_map_name] = []
             if not texture_slot.texture or texture_slot.texture.type != 'IMAGE':
                 continue
-            uv_maps[uv_map_name].append(texture_slot.texture.name)
+            uv_maps[uv_map_name].append(prepare_name(texture_slot.texture.name))
     uv_maps = [(k, v) for k, v in uv_maps.items()]
     if len(uv_maps) <= 0:
         print('Warning: No applicable shaders found')
@@ -115,10 +123,9 @@ def gather_vertices(mesh):
 
 
 def write_surface_shader(ctx, i, file):
-    filename = ctx['mesh_shader_list'][i]
-    # TODO: cut filename to quake path
-    assert len(filename.encode('utf-8')) <= 64
-    write_struct_to_file(file, '<64si', (filename.encode('utf-8'), i))
+    texname = prepare_name(ctx['mesh_shader_list'][i])
+    assert len(texname.encode('utf-8')) <= 64
+    write_struct_to_file(file, '<64si', (texname.encode('utf-8'), i))
 
 
 def write_surface_triangle(ctx, i, file):
@@ -274,7 +281,7 @@ def write_surface(ctx, i, file):
 
     write_struct_to_file(file, '<4s64siiiii', (
         b'IDP3',
-        obj.name.encode('utf-8'),
+        prepare_name(obj.name).encode('utf-8'),
         0,  # flags, ignored
         ctx['modelFrames'],  # nFrames
         nShaders, nVerts, nTris
@@ -322,7 +329,7 @@ def exportMD3(context, filename):
         write_struct_to_file(file, '<4si64siiiii', (
             b'IDP3',  # magic
             15,  # version
-            context.scene.name.encode('utf-8'),  # modelname
+            prepare_name(context.scene.name).encode('utf-8'),  # modelname
             0,  # flags, ignored
             nFrames,
             len(ctx['tagNames']),
