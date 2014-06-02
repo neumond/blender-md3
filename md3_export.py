@@ -168,7 +168,6 @@ def surface_start_frame(ctx, i, file):
 
     obj = bpy.context.scene.objects.active
     ctx['mesh_matrix'] = obj.matrix_world
-    ctx['mesh_location'] = obj.location
     ctx['mesh'] = obj.to_mesh(bpy.context.scene, True, 'PREVIEW')
     ctx['mesh'].calc_normals_split()
 
@@ -234,7 +233,7 @@ def get_evaluated_vertex_co(ctx, frame, i):
         a, b, t = ctx['mesh_sk_abs']
         co = interp(kbs[a].data[i].co, kbs[b].data[i].co, t)
 
-    co = co * ctx['mesh_matrix'] + ctx['mesh_location']
+    co = ctx['mesh_matrix'] * co
     ctx['mesh_vco'][frame].append(co)
     return co
 
