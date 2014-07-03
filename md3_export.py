@@ -308,6 +308,8 @@ def write_surface(ctx, i, file):
 
     bpy.ops.object.modifier_remove(modifier=obj.modifiers[-1].name)
 
+    print('Surface {}: nVerts={} nTris={} nShaders={}'.format(i, nVerts, nTris, nShaders))
+
 
 def exportMD3(context, filename):
     with open(filename, 'wb') as file:
@@ -353,6 +355,8 @@ def exportMD3(context, filename):
 
         if ctx['delayed']:
             raise Exception('Not all delayed write resolved: {}'.format(ctx['delayed']))
+
+        print('nFrames={} nSurfaces={}'.format(nFrames, len(ctx['surfNames'])))
 
 
 class ExportMD3(bpy.types.Operator, ExportHelper):

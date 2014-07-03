@@ -155,8 +155,8 @@ def read_surface(ctx, i, file):
     assert magic == b'IDP3'
     assert nFrames == ctx['modelFrames']
     assert nShaders <= 256
-    assert nVerts <= 4096
-    assert nTris <= 8192
+    #assert nVerts <= 4096
+    #assert nTris <= 8192
 
     ctx['mesh'] = bpy.data.meshes.new(cleanup_string(name))
     ctx['mesh'].vertices.add(count=nVerts)
