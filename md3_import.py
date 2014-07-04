@@ -7,13 +7,13 @@
 bl_info = {
     "name": "Import Quake 3 Model (.md3)",
     "author": "Vitalik Verhovodov",
-    "version": (0, 0, 0),
+    "version": (0, 1, 0),
     "blender": (2, 6, 9),
     "location": "File > Import > Quake 3 Model",
     "description": "Import to the Quake 3 Model format (.md3)",
     "warning": "",
-    "wiki_url": "",
-    "tracker_url": "",
+    "wiki_url": "http://wiki.blender.org/index.php/Extensions:2.6/Py/Scripts/Import-Export/MD3",
+    "tracker_url": "https://github.com/neumond/blender-md3/issues",
     "category": "Import-Export"}
 
 import bpy
@@ -155,8 +155,10 @@ def read_surface(ctx, i, file):
     assert magic == b'IDP3'
     assert nFrames == ctx['modelFrames']
     assert nShaders <= 256
-    #assert nVerts <= 4096
-    #assert nTris <= 8192
+    if nVerts > 4096:
+        print('Warning: md3 contains too many vertices')
+    if nTris > 8192:
+        print('Warning: md3 too many triangles')
 
     ctx['mesh'] = bpy.data.meshes.new(cleanup_string(name))
     ctx['mesh'].vertices.add(count=nVerts)

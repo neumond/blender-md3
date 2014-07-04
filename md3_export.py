@@ -7,13 +7,13 @@
 bl_info = {
     "name": "Export Quake 3 Model (.md3)",
     "author": "Vitalik Verhovodov",
-    "version": (0, 0, 0),
+    "version": (0, 1, 0),
     "blender": (2, 6, 9),
     "location": "File > Export > Quake 3 Model",
     "description": "Export to the Quake 3 Model format (.md3)",
     "warning": "",
-    "wiki_url": "",
-    "tracker_url": "",
+    "wiki_url": "http://wiki.blender.org/index.php/Extensions:2.6/Py/Scripts/Import-Export/MD3",
+    "tracker_url": "https://github.com/neumond/blender-md3/issues",
     "category": "Import-Export"}
 
 import bpy
@@ -82,22 +82,22 @@ def write_tag(ctx, i, file):
 
 
 def gather_shader_info(mesh):
+    'Returning uvmap name, texture name list'
     uv_maps = {}
     for material in mesh.materials:
         for texture_slot in material.texture_slots:
-            if texture_slot is None:
-                continue
-            if not texture_slot.use or not texture_slot.uv_layer or texture_slot.texture_coords != 'UV':
+            if texture_slot is None or not texture_slot.use or not texture_slot.uv_layer\
+                or texture_slot.texture_coords != 'UV' or not texture_slot.texture\
+                or texture_slot.texture.type != 'IMAGE':
                 continue
             uv_map_name = texture_slot.uv_layer
             if uv_map_name not in uv_maps:
                 uv_maps[uv_map_name] = []
-            if not texture_slot.texture or texture_slot.texture.type != 'IMAGE':
-                continue
+            # one UV map can be used by many textures
             uv_maps[uv_map_name].append(prepare_name(texture_slot.texture.name))
     uv_maps = [(k, v) for k, v in uv_maps.items()]
     if len(uv_maps) <= 0:
-        print('Warning: No applicable shaders found')
+        print('Warning: No UV maps found, zero filling will be used')
         return None, []
     elif len(uv_maps) == 1:
         return uv_maps[0]
@@ -123,9 +123,11 @@ def gather_vertices(mesh):
 
 
 def write_surface_shader(ctx, i, file):
-    texname = prepare_name(ctx['mesh_shader_list'][i])
-    assert len(texname.encode('utf-8')) <= 64
-    write_struct_to_file(file, '<64si', (texname.encode('utf-8'), i))
+    texname = prepare_name(ctx['mesh_shader_list'][i]).encode('utf-8')
+    if len(texname) > 64:
+        print('Warning: name of texture is too long: {}'.format(texname.decode('utf-8')))
+        texname = texname[:64]
+    write_struct_to_file(file, '<64si', (texname, i))
 
 
 def write_surface_triangle(ctx, i, file):
@@ -267,9 +269,9 @@ def write_surface(ctx, i, file):
 
     obj = bpy.context.scene.objects[ctx['surfNames'][i]]
     bpy.context.scene.objects.active = obj
-    bpy.ops.object.modifier_add(type='TRIANGULATE')
-
+    bpy.ops.object.modifier_add(type='TRIANGULATE')  # no 4-gons or n-gons
     ctx['mesh'] = obj.to_mesh(bpy.context.scene, True, 'PREVIEW')
+
     ctx['mesh'].calc_normals_split()
 
     ctx['mesh_uvmap_name'], ctx['mesh_shader_list'] = gather_shader_info(ctx['mesh'])
@@ -278,6 +280,12 @@ def write_surface(ctx, i, file):
     nShaders = len(ctx['mesh_shader_list'])
     nVerts = len(ctx['mesh_md3vert_to_loop'])
     nTris = len(ctx['mesh'].polygons)
+    if nShaders > 256:
+        print('Warning: too many textures')
+    if nVerts > 4096:
+        print('Warning: too many vertices')
+    if nTris > 8192:
+        print('Warning: too many triangles')
 
     write_struct_to_file(file, '<4s64siiiii', (
         b'IDP3',
@@ -306,6 +314,7 @@ def write_surface(ctx, i, file):
     write_nm_items(ctx, file, ctx['modelFrames'], nVerts, write_surface_vert, surface_start_frame, surface_end_frame)
     resolve_delayed(ctx, file, 'surf_offEnd', (file.tell() - surfaceOffset,))
 
+    # release here, to_mesh used for every frame
     bpy.ops.object.modifier_remove(modifier=obj.modifiers[-1].name)
 
     print('Surface {}: nVerts={} nTris={} nShaders={}'.format(i, nVerts, nTris, nShaders))
