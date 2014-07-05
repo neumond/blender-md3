@@ -1,25 +1,25 @@
-# This script is licensed as public domain.
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-# grouping to surfaces must done by UV maps
+
+# grouping to surfaces must done by UV maps also, not only normals
 # TODO: merge surfaces with same uv maps and texture
-# TODO: add assertions on maxcounts (vertex, tris, etc)
+# TODO: check bounding sphere calculation
 
-bl_info = {
-    "name": "Export Quake 3 Model (.md3)",
-    "author": "Vitalik Verhovodov",
-    "version": (0, 1, 0),
-    "blender": (2, 6, 9),
-    "location": "File > Export > Quake 3 Model",
-    "description": "Export to the Quake 3 Model format (.md3)",
-    "warning": "",
-    "wiki_url": "http://wiki.blender.org/index.php/Extensions:2.6/Py/Scripts/Import-Export/MD3",
-    "tracker_url": "https://github.com/neumond/blender-md3/issues",
-    "category": "Import-Export"}
 
 import bpy
 import mathutils
 import struct
-from bpy_extras.io_utils import ExportHelper
 from math import atan2, acos, pi, sqrt
 import re
 
@@ -366,36 +366,3 @@ def exportMD3(context, filename):
             raise Exception('Not all delayed write resolved: {}'.format(ctx['delayed']))
 
         print('nFrames={} nSurfaces={}'.format(nFrames, len(ctx['surfNames'])))
-
-
-class ExportMD3(bpy.types.Operator, ExportHelper):
-    '''Export a Quake 3 Model MD3 file'''
-    bl_idname = "export.md3"
-    bl_label = 'Export MD3'
-    filename_ext = ".md3"
-
-    def execute(self, context):
-        exportMD3(context, self.properties.filepath)
-        return {'FINISHED'}
-
-    def check(self, context):
-        filepath = bpy.path.ensure_ext(self.filepath, '.md3')
-        if filepath != self.filepath:
-            self.filepath = filepath
-            return True
-        return False
-
-
-def menu_func(self, context):
-    self.layout.operator(ExportMD3.bl_idname, text="Quake 3 Model (.md3)")
-
-def register():
-    bpy.utils.register_module(__name__)
-    bpy.types.INFO_MT_file_export.append(menu_func)
-
-def unregister():
-    bpy.utils.unregister_module(__name__)
-    bpy.types.INFO_MT_file_export.remove(menu_func)
-
-if __name__ == "__main__":
-    register()
