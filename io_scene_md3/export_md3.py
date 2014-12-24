@@ -72,13 +72,21 @@ def write_frame(ctx, i, file):
     write_struct_to_file(file, '<16s', (b'',))  # frame name, ignored
 
 
-def write_tag(ctx, i, file):
+def write_tag(ctx, frame, i, file):
     tag = bpy.context.scene.objects[ctx['tagNames'][i]]
     origin = tuple(tag.location)
     ox = tuple(tag.matrix_basis[0][:3])
     oy = tuple(tag.matrix_basis[1][:3])
     oz = tuple(tag.matrix_basis[2][:3])
     write_struct_to_file(file, '<64s12f', (prepare_name(tag.name).encode('utf-8'),) + origin + ox + oy + oz)
+
+
+def tag_start_frame(ctx, i, file):
+    bpy.context.scene.frame_set(bpy.context.scene.frame_start + i)
+
+
+def tag_end_frame(ctx, i, file):
+    pass
 
 
 def gather_shader_info(mesh):
@@ -355,7 +363,7 @@ def exportMD3(context, filename):
         resolve_delayed(ctx, file, 'offFrames', (file.tell(),))
         write_n_items(ctx, file, nFrames, write_frame)
         resolve_delayed(ctx, file, 'offTags', (file.tell(),))
-        write_n_items(ctx, file, len(ctx['tagNames']), write_tag)
+        write_nm_items(ctx, file, nFrames, len(ctx['tagNames']), write_tag, tag_start_frame, tag_end_frame)
         resolve_delayed(ctx, file, 'offSurfaces', (file.tell(),))
         write_n_items(ctx, file, len(ctx['surfNames']), write_surface)
         resolve_delayed(ctx, file, 'offEnd', (file.tell(),))

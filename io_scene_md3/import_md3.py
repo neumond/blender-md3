@@ -29,7 +29,7 @@ def read_struct_from_file(file, fmt):
 
 
 def cleanup_string(b):
-    return b.replace(b'\0', b'').decode('utf-8')
+    return b.replace(b'\0', b'').decode('utf-8', errors='ignore')
 
 
 def read_n_items(ctx, file, n, offset, func):
@@ -45,24 +45,36 @@ def read_frame(ctx, i, file):
     ctx['frameName{}'.format(i)] = cleanup_string(frame_name)
 
 
-def read_tag(ctx, i, file):
-    name = read_struct_from_file(file, '<64s')[0]
-    b = read_struct_from_file(file, '<3f3f3f3f')
+def get_tag_parameters(b):
     o = [None, None, None]
     origin, o[0], o[1], o[2] = (b[k:k+3] for k in range(0, 12, 3))
+    o = [mathutils.Vector(item) for item in o]
+    basis = mathutils.Matrix()
+    for j in range(3):
+        basis[j].xyz = o[j]
+    basis.translation = mathutils.Vector(origin)
+    return basis
+
+
+def read_tag(ctx, i, file):
+    name = read_struct_from_file(file, '<64s')[0]
     bpy.ops.object.add(type='EMPTY')
     tag = bpy.context.object
     tag.name = cleanup_string(name)
     tag.empty_draw_type = 'ARROWS'
-    tag.location = mathutils.Vector(origin)
-    o = [mathutils.Vector(item) for item in o]
-    tag.scale = mathutils.Vector(tuple(item.length for item in o))
-    for item in o:
-        item.normalize()
-    mx = mathutils.Matrix()
-    for j in range(3):
-        mx[j].xyz = o[j]
-    tag.rotation_euler = mx.to_euler()  # TODO: use tag.matrix_basis?
+    tag.rotation_mode = 'QUATERNION'
+    tag.matrix_basis = get_tag_parameters(read_struct_from_file(file, '<3f3f3f3f'))
+    ctx['tags'].append(tag)
+
+
+def read_tag_animation(ctx, i, file):
+    nTags = len(ctx['tags'])
+    tag = ctx['tags'][i % nTags]
+    read_struct_from_file(file, '<64s')
+    tag.matrix_basis = get_tag_parameters(read_struct_from_file(file, '<3f3f3f3f'))
+    frame = i // nTags
+    tag.keyframe_insert('location', frame=frame, group='LocRot')
+    tag.keyframe_insert('rotation_quaternion', frame=frame, group='LocRot')
 
 
 def guess_texture_filepath(modelpath, imagepath):
@@ -224,7 +236,11 @@ def importMD3(context, filename):
         context.scene.frame_end = nFrames - 1
 
         read_n_items(ctx, file, nFrames, offFrames, read_frame)
+        ctx['tags'] = []
         read_n_items(ctx, file, nTags, offTags, read_tag)
+        if nFrames > 1:
+            read_n_items(ctx, file, nTags * nFrames, offTags, read_tag_animation)
+        del ctx['tags']
         read_n_items(ctx, file, nSurfaces, offSurfaces, read_surface)
 
         context.scene.frame_set(0)
