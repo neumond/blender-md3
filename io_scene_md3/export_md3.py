@@ -36,14 +36,6 @@ def prepare_name(name):
     return name
 
 
-def tag_start_frame(ctx, i, file):
-    bpy.context.scene.frame_set(bpy.context.scene.frame_start + i)
-
-
-def tag_end_frame(ctx, i, file):
-    pass
-
-
 def gather_shader_info(mesh):
     'Returning uvmap name, texture name list'
     uv_maps = {}
