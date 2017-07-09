@@ -19,62 +19,9 @@
 
 import bpy
 import mathutils
-import struct
-from math import pi, sin, cos
 import os.path
 
-
-def read_struct_from_file(file, fmt):
-    return struct.unpack(fmt, file.read(struct.calcsize(fmt)))
-
-
-def cleanup_string(b):
-    return b.replace(b'\0', b'').decode('utf-8', errors='ignore')
-
-
-def read_n_items(ctx, file, n, offset, func):
-    file.seek(offset)
-    for i in range(n):
-        func(ctx, i, file)
-
-
-def read_frame(ctx, i, file):
-    b = read_struct_from_file(file, '<3f3f3f')
-    min_bounds, max_bounds, local_origin = (b[k:k+3] for k in range(0, 9, 3))
-    bounding_sphere_radius, frame_name = read_struct_from_file(file, '<f16s')
-    ctx['frameName{}'.format(i)] = cleanup_string(frame_name)
-
-
-def get_tag_parameters(b):
-    o = [None, None, None]
-    origin, o[0], o[1], o[2] = (b[k:k+3] for k in range(0, 12, 3))
-    o = [mathutils.Vector(item) for item in o]
-    basis = mathutils.Matrix()
-    for j in range(3):
-        basis[j].xyz = o[j]
-    basis.translation = mathutils.Vector(origin)
-    return basis
-
-
-def read_tag(ctx, i, file):
-    name = read_struct_from_file(file, '<64s')[0]
-    bpy.ops.object.add(type='EMPTY')
-    tag = bpy.context.object
-    tag.name = cleanup_string(name)
-    tag.empty_draw_type = 'ARROWS'
-    tag.rotation_mode = 'QUATERNION'
-    tag.matrix_basis = get_tag_parameters(read_struct_from_file(file, '<3f3f3f3f'))
-    ctx['tags'].append(tag)
-
-
-def read_tag_animation(ctx, i, file):
-    nTags = len(ctx['tags'])
-    tag = ctx['tags'][i % nTags]
-    read_struct_from_file(file, '<64s')
-    tag.matrix_basis = get_tag_parameters(read_struct_from_file(file, '<3f3f3f3f'))
-    frame = i // nTags
-    tag.keyframe_insert('location', frame=frame, group='LocRot')
-    tag.keyframe_insert('rotation_quaternion', frame=frame, group='LocRot')
+from . import fmt_md3 as fmt
 
 
 def guess_texture_filepath(modelpath, imagepath):
@@ -97,153 +44,176 @@ def guess_texture_filepath(modelpath, imagepath):
         yield nameguess + ext
 
 
-def read_surface_shader(ctx, i, file):
-    name, index = read_struct_from_file(file, '<64si')
-    name = cleanup_string(name)
-
-    texture = bpy.data.textures.new(name, 'IMAGE')
-    texture_slot = ctx['material'].texture_slots.create(i)
-    texture_slot.uv_layer = 'UVMap'
-    texture_slot.use = True
-    texture_slot.texture_coords = 'UV'
-    texture_slot.texture = texture
-
-    for fname in guess_texture_filepath(ctx['filename'], name):
-        if os.path.isfile(fname):
-            image = bpy.data.images.load(fname)
-            texture.image = image
-            break
+def get_tag_matrix_basis(data):
+    o = [mathutils.Vector(data.axis[k:k+3]) for k in range(0, 12, 3)]
+    basis = mathutils.Matrix()
+    for j in range(3):
+        basis[j].xyz = o[j]
+    basis.translation = mathutils.Vector(data.origin)
+    return basis
 
 
-def read_surface_triangle(ctx, i, file):
-    a, b, c = read_struct_from_file(file, '<3i')
-    ls = i * 3
-    ctx['mesh'].loops[ls].vertex_index = a
-    ctx['mesh'].loops[ls + 1].vertex_index = c  # swapped
-    ctx['mesh'].loops[ls + 2].vertex_index = b  # swapped
-    ctx['mesh'].polygons[i].loop_start = ls
-    ctx['mesh'].polygons[i].loop_total = 3
-    ctx['mesh'].polygons[i].use_smooth = True
+class MD3Importer:
+    def __init__(self, context):
+        self.context = context
 
+    def read_n_items(self, n, offset, func):
+        self.file.seek(offset)
+        return [func(i) for i in range(n)]
 
-def read_surface_ST(ctx, i, file):
-    s, t = read_struct_from_file(file, '<ff')
-    # store in context, these values used more than once
-    ctx['uv'].append((s, 1.0 - t))  # inverted t
+    def read_frame(self, i):
+        return fmt.Frame.funpack(self.file)
 
+    def create_tag(self, i):
+        data = fmt.Tag.funpack(self.file)
+        bpy.ops.object.add(type='EMPTY')
+        tag = bpy.context.object
+        tag.name = data.name
+        tag.empty_draw_type = 'ARROWS'
+        tag.rotation_mode = 'QUATERNION'
+        tag.matrix_basis = get_tag_matrix_basis(data)
+        return tag
 
-def make_surface_UV_map(ctx):
-    for poly in ctx['mesh'].polygons:
-        for i in range(poly.loop_start, poly.loop_start + poly.loop_total):
-            vidx = ctx['mesh'].loops[i].vertex_index
-            ctx['uvdata'][i].uv = ctx['uv'][vidx]
+    def read_tag_frame(self, i):
+        tag = self.tags[i % self.header.nTags]
+        data = fmt.Tag.funpack(self.file)
+        tag.matrix_basis = get_tag_matrix_basis(data)
+        frame = i // self.header.nTags
+        tag.keyframe_insert('location', frame=frame, group='LocRot')
+        tag.keyframe_insert('rotation_quaternion', frame=frame, group='LocRot')
 
+    def read_surface_triangle(self, i):
+        data = fmt.Triangle.funpack(self.file)
+        ls = i * 3
+        self.mesh.loops[ls].vertex_index = data.a
+        self.mesh.loops[ls + 1].vertex_index = data.c  # swapped
+        self.mesh.loops[ls + 2].vertex_index = data.b  # swapped
+        self.mesh.polygons[i].loop_start = ls
+        self.mesh.polygons[i].loop_total = 3
+        self.mesh.polygons[i].use_smooth = True
 
-def decode_normal(b):
-    lat = b[0] / 255.0 * 2 * pi
-    lon = b[1] / 255.0 * 2 * pi
-    x = cos(lat) * sin(lon)
-    y = sin(lat) * sin(lon)
-    z = cos(lon)
-    return (x, y, z)
+    def read_surface_vert(self, i):
+        data = fmt.Vertex.funpack(self.file)
+        self.verts[i].co = mathutils.Vector((data.x, data.y, data.z))
+        # ignoring data.normal here
+        # read_surface_normals reads them as a separate step
 
+    def read_surface_normals(self, i):
+        data = fmt.Vertex.funpack(self.file)
+        self.mesh.vertices[i].normal = mathutils.Vector(data.normal)
 
-vert_size = struct.calcsize('<hhh2s')
-def read_surface_vert(ctx, i, file):
-    x, y, z, n = read_struct_from_file(file, '<hhh2s')
-    ctx['verts'][i].co = mathutils.Vector((x / 64.0, y / 64.0, z / 64.0))
-
-
-def read_surface_normals(ctx, i, file):
-    x, y, z, n = read_struct_from_file(file, '<hhh2s')
-    ctx['verts'][i].normal = mathutils.Vector(decode_normal(n))
-
-
-def read_surface(ctx, i, file):
-    start_pos = file.tell()
-
-    magic, name, flags, nFrames, nShaders, nVerts, nTris, offTris, offShaders, offST, offVerts, offEnd =\
-        read_struct_from_file(file, '<4s64siiiiiiiiii')
-    assert magic == b'IDP3'
-    assert nFrames == ctx['modelFrames']
-    assert nShaders <= 256
-    if nVerts > 4096:
-        print('Warning: md3 contains too many vertices')
-    if nTris > 8192:
-        print('Warning: md3 too many triangles')
-
-    ctx['mesh'] = bpy.data.meshes.new(cleanup_string(name))
-    ctx['mesh'].vertices.add(count=nVerts)
-    ctx['mesh'].polygons.add(count=nTris)
-    ctx['mesh'].loops.add(count=nTris*3)
-
-    read_n_items(ctx, file, nTris, start_pos + offTris, read_surface_triangle)
-
-    ctx['test_normals'] = {}
-    ctx['verts'] = ctx['mesh'].vertices
-    read_n_items(ctx, file, nVerts, start_pos + offVerts, read_surface_vert)
-
-    ctx['mesh'].update(calc_edges=True)
-    ctx['mesh'].validate()
-
-    # separate step for normals. update() causes recalculation
-    read_n_items(ctx, file, nVerts, start_pos + offVerts, read_surface_normals)
-
-    ctx['material'] = bpy.data.materials.new('Main')
-    ctx['mesh'].materials.append(ctx['material'])
-
-    ctx['mesh'].uv_textures.new('UVMap')
-    ctx['uv'] = []
-    read_n_items(ctx, file, nVerts, start_pos + offST, read_surface_ST)
-    ctx['uvdata'] = ctx['mesh'].uv_layers['UVMap'].data
-    make_surface_UV_map(ctx)
-
-    read_n_items(ctx, file, nShaders, start_pos + offShaders, read_surface_shader)
-
-    obj = bpy.data.objects.new(cleanup_string(name), ctx['mesh'])
-    ctx['context'].scene.objects.link(obj)
-
-    if nFrames > 1:
-        obj.shape_key_add(name=ctx['frameName0'] + 'first')  # adding first frame, which is already loaded
-        ctx['mesh'].shape_keys.use_relative = False
-        # TODO: check MD3 has linear frame interpolation
-        for frame in range(1, nFrames):  # first frame skipped
-            shape_key = obj.shape_key_add(name=ctx['frameName{}'.format(frame)])
-            ctx['verts'] = shape_key.data
-            read_n_items(ctx, file, nVerts, start_pos + offVerts + frame * vert_size * nVerts, read_surface_vert)
+    def read_mesh_animation(self, obj, data, start_pos):
+        obj.shape_key_add(name=self.frames[0].name)  # adding first frame, which is already loaded
+        self.mesh.shape_keys.use_relative = False
+        # TODO: ensure MD3 has linear frame interpolation
+        for frame in range(1, data.nFrames):  # first frame skipped
+            shape_key = obj.shape_key_add(name=self.frames[frame].name)
+            self.verts = shape_key.data
+            self.read_n_items(
+                data.nVerts,
+                start_pos + data.offVerts + frame * fmt.Vertex.size * data.nVerts,
+                self.read_surface_vert)
         bpy.context.scene.objects.active = obj
         bpy.context.object.active_shape_key_index = 0
         bpy.ops.object.shape_key_retime()
-        for frame in range(nFrames):
-            ctx['mesh'].shape_keys.eval_time = 10.0 * (frame + 1)
-            ctx['mesh'].shape_keys.keyframe_insert('eval_time', frame=frame)
+        for frame in range(data.nFrames):
+            self.mesh.shape_keys.eval_time = 10.0 * (frame + 1)
+            self.mesh.shape_keys.keyframe_insert('eval_time', frame=frame)
 
-    file.seek(start_pos + offEnd)
+    def read_surface_ST(self, i):
+        data = fmt.TexCoord.funpack(self.file)
+        return (data.s, data.t)
 
+    def make_surface_UV_map(self, uv, uvdata):
+        for poly in self.mesh.polygons:
+            for i in range(poly.loop_start, poly.loop_start + poly.loop_total):
+                vidx = self.mesh.loops[i].vertex_index
+                uvdata[i].uv = uv[vidx]
 
-def importMD3(context, filename):
-    with open(filename, 'rb') as file:
-        magic, version, modelname, flags, nFrames, nTags, nSurfaces,\
-        nSkins, offFrames, offTags, offSurfaces, offEnd\
-            = read_struct_from_file(file, '<4si64siiiiiiiii')
-        assert magic == b'IDP3'
-        assert version == 15
-        ctx = {'context': context, 'modelFrames': nFrames, 'filename': filename}
+    def read_surface_shader(self, i):
+        data = fmt.Shader.funpack(self.file)
 
-        bpy.ops.scene.new()
-        context.scene.name = cleanup_string(modelname)
-        context.scene.frame_start = 0
-        context.scene.frame_end = nFrames - 1
+        texture = bpy.data.textures.new(data.name, 'IMAGE')
+        texture_slot = self.material.texture_slots.create(i)
+        texture_slot.uv_layer = 'UVMap'
+        texture_slot.use = True
+        texture_slot.texture_coords = 'UV'
+        texture_slot.texture = texture
 
-        read_n_items(ctx, file, nFrames, offFrames, read_frame)
-        ctx['tags'] = []
-        read_n_items(ctx, file, nTags, offTags, read_tag)
-        if nFrames > 1:
-            read_n_items(ctx, file, nTags * nFrames, offTags, read_tag_animation)
-        del ctx['tags']
-        read_n_items(ctx, file, nSurfaces, offSurfaces, read_surface)
+        for fname in guess_texture_filepath(self.filename, data.name):
+            if os.path.isfile(fname):
+                image = bpy.data.images.load(fname)
+                texture.image = image
+                break
 
-        context.scene.frame_set(0)
-        context.scene.game_settings.material_mode = 'GLSL'
+    def read_surface(self, i):
+        start_pos = self.file.tell()
 
+        data = fmt.Surface.funpack(self.file)
+        assert data.magic == b'IDP3'
+        assert data.nFrames == self.header.nFrames
+        assert data.nShaders <= 256
+        if data.nVerts > 4096:
+            print('Warning: md3 surface contains too many vertices')
+        if data.nTris > 8192:
+            print('Warning: md3 surface contains too many triangles')
+
+        self.mesh = bpy.data.meshes.new(data.name)
+        self.mesh.vertices.add(count=data.nVerts)
+        self.mesh.polygons.add(count=data.nTris)
+        self.mesh.loops.add(count=data.nTris * 3)
+
+        self.read_n_items(data.nTris, start_pos + data.offTris, self.read_surface_triangle)
+        self.verts = self.mesh.vertices
+        self.read_n_items(data.nVerts, start_pos + data.offVerts, self.read_surface_vert)
+
+        self.mesh.update(calc_edges=True)
+        self.mesh.validate()
+
+        # separate step for normals. update() causes recalculation
+        self.read_n_items(data.nVerts, start_pos + data.offVerts, self.read_surface_normals)
+
+        self.material = bpy.data.materials.new('Main')
+        self.mesh.materials.append(self.material)
+
+        self.mesh.uv_textures.new('UVMap')
+        self.make_surface_UV_map(
+            self.read_n_items(data.nVerts, start_pos + data.offST, self.read_surface_ST),
+            self.mesh.uv_layers['UVMap'].data)
+
+        self.read_n_items(data.nShaders, start_pos + data.offShaders, self.read_surface_shader)
+
+        obj = bpy.data.objects.new(data.name, self.mesh)
+        self.context.scene.objects.link(obj)
+
+        if data.nFrames > 1:
+            self.read_mesh_animation(obj, data, start_pos)
+
+        self.file.seek(start_pos + data.offEnd)
+
+    def post_settings(self):
+        self.context.scene.frame_set(0)
+        self.context.scene.game_settings.material_mode = 'GLSL'
         bpy.ops.object.lamp_add(type='SUN')
+
+    def __call__(self, filename):
+        self.filename = filename
+        with open(filename, 'rb') as file:
+            self.file = file
+
+            self.header = fmt.Header.funpack(self.file)
+            assert self.header.magic == fmt.MAGIC
+            assert self.header.version == fmt.VERSION
+
+            bpy.ops.scene.new()
+            self.context.scene.name = self.header.modelname
+            self.context.scene.frame_start = 0
+            self.context.scene.frame_end = self.header.nFrames - 1
+
+            self.frames = self.read_n_items(self.header.nFrames, self.header.offFrames, self.read_frame)
+            self.tags = self.read_n_items(self.header.nTags, self.header.offTags, self.create_tag)
+            if self.header.nFrames > 1:
+                self.read_n_items(self.header.nTags * self.header.nFrames, self.header.offTags, self.read_tag_frame)
+            self.read_n_items(self.header.nSurfaces, self.header.offSurfaces, self.read_surface)
+
+        self.post_settings()

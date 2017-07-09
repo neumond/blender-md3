@@ -19,66 +19,21 @@
 
 import bpy
 import mathutils
-import struct
-from math import atan2, acos, pi, sqrt
+from math import sqrt
 import re
+from collections import defaultdict
+
+from . import fmt_md3 as fmt
+from .utils import OffsetBytesIO
 
 
 nums = re.compile(r'\.\d{3}$')
+
+
 def prepare_name(name):
     if nums.findall(name):
         return name[:-4]  # cut off blender's .001 .002 etc
     return name
-
-
-def write_struct_to_file(file, fmt, data):
-    file.write(struct.pack(fmt, *data))
-
-
-def write_delayed(ctx, file, name, fmt, default):
-    if name in ctx['delayed']:
-        raise Exception('Delayed tag {} is already allocated'.format(name))
-    ctx['delayed'][name] = (file.tell(), fmt)
-    write_struct_to_file(file, fmt, default)
-
-
-def resolve_delayed(ctx, file, name, value):
-    oldpos = file.tell()
-    position, fmt = ctx['delayed'][name]
-    file.seek(position)
-    write_struct_to_file(file, fmt, value)
-    file.seek(oldpos)
-    del ctx['delayed'][name]
-
-
-def write_n_items(ctx, file, n, func):
-    for i in range(n):
-        func(ctx, i, file)
-
-
-def write_nm_items(ctx, file, n, m, func, pre_outerfunc, post_outerfunc):
-    for i in range(n):
-        pre_outerfunc(ctx, i, file)
-        for j in range(m):
-            func(ctx, i, j, file)
-        post_outerfunc(ctx, i, file)
-
-
-def write_frame(ctx, i, file):
-    write_delayed(ctx, file, 'frame{}_min'.format(i), '<3f', (0.0, 0.0, 0.0))
-    write_delayed(ctx, file, 'frame{}_max'.format(i), '<3f', (0.0, 0.0, 0.0))
-    write_struct_to_file(file, '<3f', (0.0, 0.0, 0.0))  # local_origin
-    write_delayed(ctx, file, 'frame{}_sphere'.format(i), '<f', (0.0,))
-    write_struct_to_file(file, '<16s', (b'',))  # frame name, ignored
-
-
-def write_tag(ctx, frame, i, file):
-    tag = bpy.context.scene.objects[ctx['tagNames'][i]]
-    origin = tuple(tag.location)
-    ox = tuple(tag.matrix_basis[0][:3])
-    oy = tuple(tag.matrix_basis[1][:3])
-    oz = tuple(tag.matrix_basis[2][:3])
-    write_struct_to_file(file, '<64s12f', (prepare_name(tag.name).encode('utf-8'),) + origin + ox + oy + oz)
 
 
 def tag_start_frame(ctx, i, file):
@@ -94,9 +49,13 @@ def gather_shader_info(mesh):
     uv_maps = {}
     for material in mesh.materials:
         for texture_slot in material.texture_slots:
-            if texture_slot is None or not texture_slot.use or not texture_slot.uv_layer\
-                or texture_slot.texture_coords != 'UV' or not texture_slot.texture\
-                or texture_slot.texture.type != 'IMAGE':
+            if (
+                texture_slot is None
+                or not texture_slot.use
+                or not texture_slot.uv_layer
+                or texture_slot.texture_coords != 'UV' or not texture_slot.texture
+                or texture_slot.texture.type != 'IMAGE'
+            ):
                 continue
             uv_map_name = texture_slot.uv_layer
             if uv_map_name not in uv_maps:
@@ -130,31 +89,6 @@ def gather_vertices(mesh):
     return md3vert_to_loop_map, loop_to_md3vert_map
 
 
-def write_surface_shader(ctx, i, file):
-    texname = prepare_name(ctx['mesh_shader_list'][i]).encode('utf-8')
-    if len(texname) > 64:
-        print('Warning: name of texture is too long: {}'.format(texname.decode('utf-8')))
-        texname = texname[:64]
-    write_struct_to_file(file, '<64si', (texname, i))
-
-
-def write_surface_triangle(ctx, i, file):
-    assert ctx['mesh'].polygons[i].loop_total == 3
-    start = ctx['mesh'].polygons[i].loop_start
-    a, c, b = (ctx['mesh_loop_to_md3vert'][j] for j in range(start, start + 3))  # swapped c/b
-    write_struct_to_file(file, '<3i', (a, b, c))
-
-
-def write_surface_ST(ctx, i, file):
-    if ctx['mesh_uvmap_name'] is None:
-        s, t = 0.0, 0.0
-    else:
-        loop_idx = ctx['mesh_md3vert_to_loop'][i]
-        s, t = ctx['mesh'].uv_layers[ctx['mesh_uvmap_name']].data[loop_idx].uv
-        t = 1.0 - t  # inverted t
-    write_struct_to_file(file, '<ff', (s, t))
-
-
 def interp(a, b, t):
     return (b - a) * t + a
 
@@ -175,202 +109,223 @@ def find_interval(vs, t):
     return a, b
 
 
-def _dict_remove(d, key):
-    if key in d:
-        del d[key]
+class MD3Exporter:
+    def __init__(self, context):
+        self.context = context
 
+    def pack_tag(self, name):
+        tag = bpy.context.scene.objects[name]
+        ox = tuple(tag.matrix_basis[0][:3])
+        oy = tuple(tag.matrix_basis[1][:3])
+        oz = tuple(tag.matrix_basis[2][:3])
+        return fmt.Tag.pack(
+            name=prepare_name(tag.name),
+            origin=tuple(tag.location),
+            axis=ox + oy + oz,
+        )
 
-def surface_start_frame(ctx, i, file):
-    bpy.context.scene.frame_set(bpy.context.scene.frame_start + i)
+    def pack_animated_tags(self):
+        tags_bin = []
+        for frame in range(self.nFrames):
+            self.switch_frame(frame)
+            for name in self.tagNames:
+                tags_bin.append(self.pack_tag(name))
+        return b''.join(tags_bin)
 
-    obj = bpy.context.scene.objects.active
-    ctx['mesh_matrix'] = obj.matrix_world
-    ctx['mesh'] = obj.to_mesh(bpy.context.scene, True, 'PREVIEW')
-    ctx['mesh'].calc_normals_split()
+    def pack_surface_shader(self, i):
+        return fmt.Shader.pack(
+            name=prepare_name(self.mesh_shader_list[i]),
+            index=i,
+        )
 
-    ctx['mesh_vco'][i] = ctx['mesh_vco'].get(i, [])
+    def pack_surface_triangle(self, i):
+        assert self.mesh.polygons[i].loop_total == 3
+        start = self.mesh.polygons[i].loop_start
+        a, b, c = (self.mesh_loop_to_md3vert[j] for j in range(start, start + 3))
+        return fmt.Triangle.pack(a, c, b)  # swapped c/b
 
-    _dict_remove(ctx, 'mesh_sk_rel')
-    _dict_remove(ctx, 'mesh_sk_abs')
+    def get_evaluated_vertex_co(self, frame, i):
+        co = self.mesh.vertices[i].co.copy()
 
-    shape_keys = ctx['mesh'].shape_keys
-    if shape_keys is not None:
-        kblocks = shape_keys.key_blocks
-        if shape_keys.use_relative:
-            ctx['mesh_sk_rel'] = [k.value for k in kblocks]
+        if self.mesh_sk_rel is not None:
+            bco = co.copy()
+            for ki, k in enumerate(self.mesh.shape_keys.key_blocks):
+                co += (k.data[i].co - bco) * self.mesh_sk_rel[ki]
+        elif self.mesh_sk_abs is not None:
+            kbs = self.mesh.shape_keys.key_blocks
+            a, b, t = self.mesh_sk_abs
+            co = interp(kbs[a].data[i].co, kbs[b].data[i].co, t)
+
+        co = self.mesh_matrix * co
+        self.mesh_vco[frame].append(co)
+        return co
+
+    def pack_surface_vert(self, frame, i):
+        loop_id = self.mesh_md3vert_to_loop[i]
+        vert_id = self.mesh.loops[loop_id].vertex_index
+        return fmt.Vertex.pack(
+            *self.get_evaluated_vertex_co(frame, vert_id),
+            tuple(self.mesh.loops[loop_id].normal))
+
+    def pack_surface_ST(self, i):
+        if self.mesh_uvmap_name is None:
+            s, t = 0.0, 0.0
         else:
-            e = shape_keys.eval_time / 100.0
-            a, b = find_interval([k.frame for k in kblocks], e)
-            if a is None:
-                ctx['mesh_sk_abs'] = (b, b, 0.0)
-            elif b is None:
-                ctx['mesh_sk_abs'] = (a, a, 0.0)
+            loop_idx = self.mesh_md3vert_to_loop[i]
+            s, t = self.mesh.uv_layers[self.mesh_uvmap_name].data[loop_idx].uv
+        return fmt.TexCoord.pack(s, t)
+
+    def switch_frame(self, i):
+        bpy.context.scene.frame_set(bpy.context.scene.frame_start + i)
+
+    def surface_start_frame(self, i):
+        self.switch_frame(i)
+
+        obj = bpy.context.scene.objects.active
+        self.mesh_matrix = obj.matrix_world
+        self.mesh = obj.to_mesh(bpy.context.scene, True, 'PREVIEW')
+        self.mesh.calc_normals_split()
+
+        self.mesh_sk_rel = None
+        self.mesh_sk_abs = None
+
+        shape_keys = self.mesh.shape_keys
+        if shape_keys is not None:
+            kblocks = shape_keys.key_blocks
+            if shape_keys.use_relative:
+                self.mesh_sk_rel = [k.value for k in kblocks]
             else:
-                ctx['mesh_sk_abs'] = (a, b, (e - kblocks[a].frame) / (kblocks[b].frame - kblocks[a].frame))
+                e = shape_keys.eval_time / 100.0
+                a, b = find_interval([k.frame for k in kblocks], e)
+                if a is None:
+                    self.mesh_sk_abs = (b, b, 0.0)
+                elif b is None:
+                    self.mesh_sk_abs = (a, a, 0.0)
+                else:
+                    self.mesh_sk_abs = (a, b, (e - kblocks[a].frame) / (kblocks[b].frame - kblocks[a].frame))
 
+    def pack_surface(self, surf_name):
+        obj = bpy.context.scene.objects[surf_name]
+        bpy.context.scene.objects.active = obj
+        bpy.ops.object.modifier_add(type='TRIANGULATE')  # no 4-gons or n-gons
+        self.mesh = obj.to_mesh(bpy.context.scene, True, 'PREVIEW')
+        self.mesh.calc_normals_split()
 
-def surface_end_frame(ctx, i, file):
-    ctx['mesh'].free_normals_split()
+        self.mesh_uvmap_name, self.mesh_shader_list = gather_shader_info(self.mesh)
+        self.mesh_md3vert_to_loop, self.mesh_loop_to_md3vert = gather_vertices(self.mesh)
 
+        nShaders = len(self.mesh_shader_list)
+        nVerts = len(self.mesh_md3vert_to_loop)
+        nTris = len(self.mesh.polygons)
 
-def post_process_frame(ctx, i, file):
-    center = mathutils.Vector((0.0, 0.0, 0.0))
-    x1, x2, y1, y2, z1, z2 = [0.0] * 6
-    first = True
-    for co in ctx['mesh_vco'][i]:
-        if first:
-            x1, x2 = co.x, co.x
-            y1, y2 = co.y, co.y
-            z1, z2 = co.z, co.z
-        else:
-            x1, y1, z1 = min(co.x, x1), min(co.y, y1), min(co.z, z1)
-            x2, y2, z2 = max(co.x, x2), max(co.y, y2), max(co.z, z2)
-        first = False
-        center += co
-    center /= len(ctx['mesh_vco'][i])
-    r = 0.0
-    for co in ctx['mesh_vco'][i]:
-        r = max(r, (co - center).length_squared)
-    r = sqrt(r)
+        bpy.context.scene.frame_set(bpy.context.scene.frame_start)
 
-    resolve_delayed(ctx, file, 'frame{}_min'.format(i), (x1, y1, z1))
-    resolve_delayed(ctx, file, 'frame{}_max'.format(i), (x2, y2, z2))
-    resolve_delayed(ctx, file, 'frame{}_sphere'.format(i), (r,))
+        f = OffsetBytesIO(start_offset=fmt.Surface.size)
+        f.mark('offShaders')
+        f.write(b''.join([self.pack_surface_shader(i) for i in range(nShaders)]))
+        f.mark('offTris')
+        f.write(b''.join([self.pack_surface_triangle(i) for i in range(nTris)]))
+        f.mark('offST')
+        f.write(b''.join([self.pack_surface_ST(i) for i in range(nVerts)]))
+        f.mark('offVerts')
 
+        self.mesh.free_normals_split()
 
-def get_evaluated_vertex_co(ctx, frame, i):
-    co = ctx['mesh'].vertices[i].co.copy()
+        for frame in range(self.nFrames):
+            self.surface_start_frame(frame)
+            f.write(b''.join([self.pack_surface_vert(frame, i) for i in range(nVerts)]))
+            self.mesh.free_normals_split()
 
-    if 'mesh_sk_rel' in ctx:
-        bco = co.copy()
-        for ki, k in enumerate(ctx['mesh'].shape_keys.key_blocks):
-            co += (k.data[i].co - bco) * ctx['mesh_sk_rel'][ki]
-    elif 'mesh_sk_abs' in ctx:
-        kbs = ctx['mesh'].shape_keys.key_blocks
-        a, b, t = ctx['mesh_sk_abs']
-        co = interp(kbs[a].data[i].co, kbs[b].data[i].co, t)
+        f.mark('offEnd')
 
-    co = ctx['mesh_matrix'] * co
-    ctx['mesh_vco'][frame].append(co)
-    return co
+        # release here, to_mesh used for every frame
+        bpy.ops.object.modifier_remove(modifier=obj.modifiers[-1].name)
 
-
-def encode_normal(n):
-    x, y, z = n
-    if x == 0 and y == 0:
-        return bytes((0, 0)) if z > 0 else bytes((128, 0))
-    lon = int(atan2(y, x) * 255 / (2 * pi)) & 255
-    lat = int(acos(z) * 255 / (2 * pi)) & 255
-    return bytes((lat, lon))
-
-
-def write_surface_vert(ctx, frame, i, file):
-    loop_id = ctx['mesh_md3vert_to_loop'][i]
-    vert_id = ctx['mesh'].loops[loop_id].vertex_index
-    x, y, z = [int(v * 64.0) for v in get_evaluated_vertex_co(ctx, frame, vert_id)]
-    n = encode_normal(ctx['mesh'].loops[loop_id].normal)
-    write_struct_to_file(file, '<hhh2s', (x, y, z, n))
-
-
-def write_surface(ctx, i, file):
-    surfaceOffset = file.tell()
-
-    obj = bpy.context.scene.objects[ctx['surfNames'][i]]
-    bpy.context.scene.objects.active = obj
-    bpy.ops.object.modifier_add(type='TRIANGULATE')  # no 4-gons or n-gons
-    ctx['mesh'] = obj.to_mesh(bpy.context.scene, True, 'PREVIEW')
-
-    ctx['mesh'].calc_normals_split()
-
-    ctx['mesh_uvmap_name'], ctx['mesh_shader_list'] = gather_shader_info(ctx['mesh'])
-    ctx['mesh_md3vert_to_loop'], ctx['mesh_loop_to_md3vert'] = gather_vertices(ctx['mesh'])
-    ctx['mesh_vco'] = {}
-    nShaders = len(ctx['mesh_shader_list'])
-    nVerts = len(ctx['mesh_md3vert_to_loop'])
-    nTris = len(ctx['mesh'].polygons)
-    if nShaders > 256:
-        print('Warning: too many textures')
-    if nVerts > 4096:
-        print('Warning: too many vertices')
-    if nTris > 8192:
-        print('Warning: too many triangles')
-
-    write_struct_to_file(file, '<4s64siiiii', (
-        b'IDP3',
-        prepare_name(obj.name).encode('utf-8'),
-        0,  # flags, ignored
-        ctx['modelFrames'],  # nFrames
-        nShaders, nVerts, nTris
-    ))
-    write_delayed(ctx, file, 'surf_offTris', '<i', (0,))
-    write_delayed(ctx, file, 'surf_offShaders', '<i', (0,))
-    write_delayed(ctx, file, 'surf_offST', '<i', (0,))
-    write_delayed(ctx, file, 'surf_offVerts', '<i', (0,))
-    write_delayed(ctx, file, 'surf_offEnd', '<i', (0,))
-
-    bpy.context.scene.frame_set(bpy.context.scene.frame_start)
-    resolve_delayed(ctx, file, 'surf_offShaders', (file.tell() - surfaceOffset,))
-    write_n_items(ctx, file, nShaders, write_surface_shader)
-    resolve_delayed(ctx, file, 'surf_offTris', (file.tell() - surfaceOffset,))
-    write_n_items(ctx, file, nTris, write_surface_triangle)
-    resolve_delayed(ctx, file, 'surf_offST', (file.tell() - surfaceOffset,))
-    write_n_items(ctx, file, nVerts, write_surface_ST)
-    resolve_delayed(ctx, file, 'surf_offVerts', (file.tell() - surfaceOffset,))
-
-    ctx['mesh'].free_normals_split()
-
-    write_nm_items(ctx, file, ctx['modelFrames'], nVerts, write_surface_vert, surface_start_frame, surface_end_frame)
-    resolve_delayed(ctx, file, 'surf_offEnd', (file.tell() - surfaceOffset,))
-
-    # release here, to_mesh used for every frame
-    bpy.ops.object.modifier_remove(modifier=obj.modifiers[-1].name)
-
-    print('Surface {}: nVerts={} nTris={} nShaders={}'.format(i, nVerts, nTris, nShaders))
-
-
-def exportMD3(context, filename):
-    with open(filename, 'wb') as file:
-        nFrames = context.scene.frame_end - context.scene.frame_start + 1
-        ctx = {
-            'delayed': {},
-            'context': context,
-            'filename': filename,
-            'modelFrames': nFrames,
-            'surfNames': [],
-            'tagNames': [],
-        }
-        for o in context.scene.objects:
-            if o.type == 'MESH':
-                ctx['surfNames'].append(o.name)
-            elif o.type == 'EMPTY' and o.empty_draw_type == 'ARROWS':
-                ctx['tagNames'].append(o.name)
-
-        write_struct_to_file(file, '<4si64siiiii', (
-            b'IDP3',  # magic
-            15,  # version
-            prepare_name(context.scene.name).encode('utf-8'),  # modelname
-            0,  # flags, ignored
-            nFrames,
-            len(ctx['tagNames']),
-            len(ctx['surfNames']),
-            0,  # count of skins, ignored
+        print('Surface {}: nVerts={}{} nTris={}{} nShaders={}{}'.format(
+            surf_name,
+            nVerts, ' (Too many!)' if nVerts > 4096 else '',
+            nTris, ' (Too many!)' if nTris > 8192 else '',
+            nShaders, ' (Too many!)' if nShaders > 256 else '',
         ))
-        write_delayed(ctx, file, 'offFrames', '<i', (0,))
-        write_delayed(ctx, file, 'offTags', '<i', (0,))
-        write_delayed(ctx, file, 'offSurfaces', '<i', (0,))
-        write_delayed(ctx, file, 'offEnd', '<i', (0,))
 
-        resolve_delayed(ctx, file, 'offFrames', (file.tell(),))
-        write_n_items(ctx, file, nFrames, write_frame)
-        resolve_delayed(ctx, file, 'offTags', (file.tell(),))
-        write_nm_items(ctx, file, nFrames, len(ctx['tagNames']), write_tag, tag_start_frame, tag_end_frame)
-        resolve_delayed(ctx, file, 'offSurfaces', (file.tell(),))
-        write_n_items(ctx, file, len(ctx['surfNames']), write_surface)
-        resolve_delayed(ctx, file, 'offEnd', (file.tell(),))
+        return fmt.Surface.pack(
+            magic=fmt.MAGIC,
+            name=prepare_name(obj.name),
+            flags=0,  # ignored
+            nFrames=self.nFrames,
+            nShaders=nShaders,
+            nVerts=nVerts,
+            nTris=nTris,
+            **f.getoffsets()
+        ) + f.getvalue()
 
-        write_n_items(ctx, file, ctx['modelFrames'], post_process_frame)
+    def get_frame_data(self, i):
+        center = mathutils.Vector((0.0, 0.0, 0.0))
+        x1, x2, y1, y2, z1, z2 = [0.0] * 6
+        first = True
+        for co in self.mesh_vco[i]:
+            if first:
+                x1, x2 = co.x, co.x
+                y1, y2 = co.y, co.y
+                z1, z2 = co.z, co.z
+            else:
+                x1, y1, z1 = min(co.x, x1), min(co.y, y1), min(co.z, z1)
+                x2, y2, z2 = max(co.x, x2), max(co.y, y2), max(co.z, z2)
+            first = False
+            center += co
+        center /= len(self.mesh_vco[i])  # TODO: can be very distorted
+        r = 0.0
+        for co in self.mesh_vco[i]:
+            r = max(r, (co - center).length_squared)
+        r = sqrt(r)
+        return {
+            'minBounds': (x1, y1, z1),
+            'maxBounds': (x2, y2, z2),
+            'radius': r,  # TODO: not sure the radius is measured from center, and not localOrigin
+        }
 
-        if ctx['delayed']:
-            raise Exception('Not all delayed write resolved: {}'.format(ctx['delayed']))
+    def pack_frame(self, i):
+        return fmt.Frame.pack(
+            localOrigin=(0.0, 0.0, 0.0),
+            name='',  # frame name, ignored, TODO:
+            **self.get_frame_data(i)
+        )
 
-        print('nFrames={} nSurfaces={}'.format(nFrames, len(ctx['surfNames'])))
+    def __call__(self, filename):
+        self.nFrames = self.context.scene.frame_end - self.context.scene.frame_start + 1
+        self.surfNames = []
+        self.tagNames = []
+        for o in self.context.scene.objects:
+            if o.type == 'MESH':
+                self.surfNames.append(o.name)
+            elif o.type == 'EMPTY' and o.empty_draw_type == 'ARROWS':
+                self.tagNames.append(o.name)
+        self.mesh_vco = defaultdict(list)
+
+        tags_bin = self.pack_animated_tags()
+        surfaces_bin = [self.pack_surface(name) for name in self.surfNames]
+        frames_bin = [self.pack_frame(i) for i in range(self.nFrames)]
+
+        f = OffsetBytesIO(start_offset=fmt.Header.size)
+        f.mark('offFrames')
+        f.write(b''.join(frames_bin))
+        f.mark('offTags')
+        f.write(tags_bin)
+        f.mark('offSurfaces')
+        f.write(b''.join(surfaces_bin))
+        f.mark('offEnd')
+
+        with open(filename, 'wb') as file:
+            file.write(fmt.Header.pack(
+                magic=fmt.MAGIC,
+                version=fmt.VERSION,
+                modelname=self.context.scene.name,
+                flags=0,  # ignored
+                nFrames=self.nFrames,
+                nTags=len(self.tagNames),
+                nSurfaces=len(self.surfNames),
+                nSkins=0,  # count of skins, ignored
+                **f.getoffsets()
+            ))
+            file.write(f.getvalue())
+            print('nFrames={} nSurfaces={}'.format(self.nFrames, len(self.surfNames)))
