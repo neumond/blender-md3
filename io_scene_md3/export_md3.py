@@ -65,12 +65,16 @@ def gather_shader_info(mesh):
         return uv_maps[0]
 
 
-def gather_vertices(mesh):
+def gather_vertices(mesh, uvmap_data=None):
     md3vert_to_loop_map = []
     loop_to_md3vert_map = []
     index = {}
     for i, loop in enumerate(mesh.loops):
-        key = (loop.vertex_index, tuple(loop.normal))
+        key = (
+            loop.vertex_index,
+            tuple(loop.normal),
+            None if uvmap_data is None else tuple(uvmap_data[i].uv)
+        )
         md3id = index.get(key, None)
         if md3id is None:
             md3id = len(md3vert_to_loop_map)
@@ -202,7 +206,9 @@ class MD3Exporter:
         self.mesh.calc_normals_split()
 
         self.mesh_uvmap_name, self.mesh_shader_list = gather_shader_info(self.mesh)
-        self.mesh_md3vert_to_loop, self.mesh_loop_to_md3vert = gather_vertices(self.mesh)
+        self.mesh_md3vert_to_loop, self.mesh_loop_to_md3vert = gather_vertices(
+            self.mesh,
+            None if self.mesh_uvmap_name is None else self.mesh.uv_layers[self.mesh_uvmap_name].data)
 
         nShaders = len(self.mesh_shader_list)
         nVerts = len(self.mesh_md3vert_to_loop)
