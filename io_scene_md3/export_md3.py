@@ -115,13 +115,11 @@ class MD3Exporter:
 
     def pack_tag(self, name):
         tag = bpy.context.scene.objects[name]
-        ox = tuple(tag.matrix_basis[0][:3])
-        oy = tuple(tag.matrix_basis[1][:3])
-        oz = tuple(tag.matrix_basis[2][:3])
+        m = tag.matrix_basis.transposed()
         return fmt.Tag.pack(
             name=prepare_name(tag.name),
             origin=tuple(tag.location),
-            axis=ox + oy + oz,
+            axis=sum([tuple(m[j].xyz) for j in range(3)], ()),
         )
 
     def pack_animated_tags(self):

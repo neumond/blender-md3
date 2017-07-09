@@ -45,10 +45,9 @@ def guess_texture_filepath(modelpath, imagepath):
 
 
 def get_tag_matrix_basis(data):
-    o = [mathutils.Vector(data.axis[k:k+3]) for k in range(0, 9, 3)]
-    basis = mathutils.Matrix()
+    basis = mathutils.Matrix.Identity(4)
     for j in range(3):
-        basis[j].xyz = o[j]
+        basis[j].xyz = data.axis[j::3]
     basis.translation = mathutils.Vector(data.origin)
     return basis
 
