@@ -61,11 +61,14 @@ class MD3Importer:
         self.file.seek(offset)
         return [func(i) for i in range(n)]
 
+    def unpack(self, rtype):
+        return rtype.funpack(self.file)
+
     def read_frame(self, i):
-        return fmt.Frame.funpack(self.file)
+        return self.unpack(fmt.Frame)
 
     def create_tag(self, i):
-        data = fmt.Tag.funpack(self.file)
+        data = self.unpack(fmt.Tag)
         bpy.ops.object.add(type='EMPTY')
         tag = bpy.context.object
         tag.name = data.name
@@ -76,14 +79,14 @@ class MD3Importer:
 
     def read_tag_frame(self, i):
         tag = self.tags[i % self.header.nTags]
-        data = fmt.Tag.funpack(self.file)
+        data = self.unpack(fmt.Tag)
         tag.matrix_basis = get_tag_matrix_basis(data)
         frame = i // self.header.nTags
         tag.keyframe_insert('location', frame=frame, group='LocRot')
         tag.keyframe_insert('rotation_quaternion', frame=frame, group='LocRot')
 
     def read_surface_triangle(self, i):
-        data = fmt.Triangle.funpack(self.file)
+        data = self.unpack(fmt.Triangle)
         ls = i * 3
         self.mesh.loops[ls].vertex_index = data.a
         self.mesh.loops[ls + 1].vertex_index = data.c  # swapped
@@ -93,13 +96,13 @@ class MD3Importer:
         self.mesh.polygons[i].use_smooth = True
 
     def read_surface_vert(self, i):
-        data = fmt.Vertex.funpack(self.file)
+        data = self.unpack(fmt.Vertex)
         self.verts[i].co = mathutils.Vector((data.x, data.y, data.z))
         # ignoring data.normal here
         # read_surface_normals reads them as a separate step
 
     def read_surface_normals(self, i):
-        data = fmt.Vertex.funpack(self.file)
+        data = self.unpack(fmt.Vertex)
         self.mesh.vertices[i].normal = mathutils.Vector(data.normal)
 
     def read_mesh_animation(self, obj, data, start_pos):
@@ -121,7 +124,7 @@ class MD3Importer:
             self.mesh.shape_keys.keyframe_insert('eval_time', frame=frame)
 
     def read_surface_ST(self, i):
-        data = fmt.TexCoord.funpack(self.file)
+        data = self.unpack(fmt.TexCoord)
         return (data.s, data.t)
 
     def make_surface_UV_map(self, uv, uvdata):
@@ -131,7 +134,7 @@ class MD3Importer:
                 uvdata[i].uv = uv[vidx]
 
     def read_surface_shader(self, i):
-        data = fmt.Shader.funpack(self.file)
+        data = self.unpack(fmt.Shader)
 
         texture = bpy.data.textures.new(data.name, 'IMAGE')
         texture_slot = self.material.texture_slots.create(i)
@@ -151,7 +154,7 @@ class MD3Importer:
     def read_surface(self, i):
         start_pos = self.file.tell()
 
-        data = fmt.Surface.funpack(self.file)
+        data = self.unpack(fmt.Surface)
         assert data.magic == b'IDP3'
         assert data.nFrames == self.header.nFrames
         assert data.nShaders <= 256
@@ -203,7 +206,7 @@ class MD3Importer:
         with open(filename, 'rb') as file:
             self.file = file
 
-            self.header = fmt.Header.funpack(self.file)
+            self.header = self.unpack(fmt.Header)
             assert self.header.magic == fmt.MAGIC
             assert self.header.version == fmt.VERSION
 
