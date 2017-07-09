@@ -45,7 +45,7 @@ def guess_texture_filepath(modelpath, imagepath):
 
 
 def get_tag_matrix_basis(data):
-    o = [mathutils.Vector(data.axis[k:k+3]) for k in range(0, 12, 3)]
+    o = [mathutils.Vector(data.axis[k:k+3]) for k in range(0, 9, 3)]
     basis = mathutils.Matrix()
     for j in range(3):
         basis[j].xyz = o[j]
@@ -141,6 +141,8 @@ class MD3Importer:
         texture_slot.texture = texture
 
         for fname in guess_texture_filepath(self.filename, data.name):
+            if '\0' in fname:  # preventing ValuError: embedded null byte
+                continue
             if os.path.isfile(fname):
                 image = bpy.data.images.load(fname)
                 texture.image = image
