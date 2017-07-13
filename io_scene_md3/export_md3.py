@@ -159,7 +159,7 @@ class MD3Exporter:
         vert_id = self.mesh.loops[loop_id].vertex_index
         return fmt.Vertex.pack(
             *self.get_evaluated_vertex_co(frame, vert_id),
-            tuple(self.mesh.loops[loop_id].normal))
+            normal=tuple(self.mesh.loops[loop_id].normal))
 
     def pack_surface_ST(self, i):
         if self.mesh_uvmap_name is None:
