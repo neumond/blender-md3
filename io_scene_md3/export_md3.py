@@ -269,7 +269,8 @@ class MD3Exporter:
                 x2, y2, z2 = max(co.x, x2), max(co.y, y2), max(co.z, z2)
             first = False
             center += co
-        center /= len(self.mesh_vco[i])  # TODO: can be very distorted
+        if len(self.mesh_vco[i]):  # issue #9
+            center /= len(self.mesh_vco[i])  # TODO: can be very distorted
         r = 0.0
         for co in self.mesh_vco[i]:
             r = max(r, (co - center).length_squared)
