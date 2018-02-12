@@ -13,6 +13,7 @@ bl_info = {
 
 
 import bpy
+import struct
 from bpy.props import StringProperty
 from bpy_extras.io_utils import ImportHelper, ExportHelper
 
@@ -38,10 +39,12 @@ class ExportMD3(bpy.types.Operator, ExportHelper):
     filter_glob = StringProperty(default="*.md3", options={'HIDDEN'})
 
     def execute(self, context):
-        from .export_md3 import MD3Exporter
-        MD3Exporter(context)(self.properties.filepath)
-        return {'FINISHED'}
-
+        try:
+            from .export_md3 import MD3Exporter
+            MD3Exporter(context)(self.properties.filepath)
+            return {'FINISHED'}
+        except struct.error:
+            self.report({'ERROR'}, "Mesh does not fit within the MD3 model space. Vertex axies locations must be below 512 blender units.")
 
 def menu_func_import(self, context):
     self.layout.operator(ImportMD3.bl_idname, text="Quake 3 Model (.md3)")

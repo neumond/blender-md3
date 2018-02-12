@@ -186,6 +186,9 @@ class MD3Exporter:
 
     def pack_surface(self, surf_name):
         obj = bpy.context.scene.objects[surf_name]
+        if obj.hide:
+            return b''
+
         bpy.context.scene.objects.active = obj
         bpy.ops.object.modifier_add(type='TRIANGULATE')  # no 4-gons or n-gons
         self.mesh = obj.to_mesh(bpy.context.scene, True, 'PREVIEW')
