@@ -186,9 +186,6 @@ class MD3Exporter:
 
     def pack_surface(self, surf_name):
         obj = bpy.context.scene.objects[surf_name]
-        if obj.hide:
-            return b''
-
         bpy.context.scene.objects.active = obj
         bpy.ops.object.modifier_add(type='TRIANGULATE')  # no 4-gons or n-gons
         self.mesh = obj.to_mesh(bpy.context.scene, True, 'PREVIEW')
@@ -289,8 +286,11 @@ class MD3Exporter:
         self.mesh_vco = defaultdict(list)
 
         tags_bin = self.pack_animated_tags()
-        surfaces_bin = [self.pack_surface(name) for name in self.surfNames]
+        surfaces_bin = [self.pack_surface(name) for name in self.surfNames if not bpy.context.scene.objects[name].hide]
         frames_bin = [self.pack_frame(i) for i in range(self.nFrames)]
+
+        if len(surfaces_bin) == 0:
+            raise ValueError("At least one surface mesh must be visible in order to export.")
 
         f = OffsetBytesIO(start_offset=fmt.Header.size)
         f.mark('offFrames')
@@ -309,9 +309,9 @@ class MD3Exporter:
                 flags=0,  # ignored
                 nFrames=self.nFrames,
                 nTags=len(self.tagNames),
-                nSurfaces=len(self.surfNames),
+                nSurfaces=len(surfaces_bin),
                 nSkins=0,  # count of skins, ignored
                 **f.getoffsets()
             ))
             file.write(f.getvalue())
-            print('nFrames={} nSurfaces={}'.format(self.nFrames, len(self.surfNames)))
+            print('nFrames={} nSurfaces={}'.format(self.nFrames, len(surfaces_bin)))
