@@ -1,2 +1,6 @@
 *.pyc
 __pycache__
+*.md3
+*.blend*
+*.zip
+/models/
