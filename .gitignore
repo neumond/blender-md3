@@ -7,3 +7,4 @@ __pycache__/
 /bugs/
 /.pytest_cache/
 /result.txt
+/blender-*/
