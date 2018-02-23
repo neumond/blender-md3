@@ -6,14 +6,15 @@ env:
 matrix:
   include:
     - python: "3.5"
-      env: "BLENDER_TAR=http://mirror.cs.umn.edu/blender.org/release/Blender2.79/blender-2.79-linux-glibc219-x86_64.tar.bz2"
-    # - python: "3.4"
-    #   env: "BLENDER_TAR=http://mirror.cs.umn.edu/blender.org/release/Blender2.72/blender-2.72-linux-glibc211-x86_64.tar.bz2"
-    # - python: "3.3"
-    #   env: "BLENDER_TAR=http://mirror.cs.umn.edu/blender.org/release/Blender2.69/blender-2.69-linux-glibc211-x86_64.tar.bz2"
-install:
+      env: "BLENDER_TAR=http://download.blender.org/release/Blender2.79/blender-2.79-linux-glibc219-x86_64.tar.bz2"
+    - python: "3.4"
+      env: "BLENDER_TAR=http://download.blender.org/release/Blender2.72/blender-2.72-linux-glibc211-x86_64.tar.bz2"
+    - python: "3.3"
+      env: "BLENDER_TAR=http://download.blender.org/release/Blender2.69/blender-2.69-linux-glibc211-x86_64.tar.bz2"
+before_install:
   - wget -O - ${BLENDER_TAR} | tar -jxf -
   - mv blender-* blender
+install:
   - pip install pytest
 script:
   - >

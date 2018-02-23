@@ -1,7 +1,8 @@
-.MD3 support for Blender
-========================
+[![Build Status](https://travis-ci.org/neumond/blender-md3.svg?branch=master)](https://travis-ci.org/neumond/blender-md3)
 
-Up-to-date addon (Blender 2.6.9 supported!) for working with Quake 3 model format, written from scratch.
+# .MD3 support for Blender
+
+Up-to-date addon (Blender ≥ 2.6.9 supported!) for working with Quake 3 model format, written from scratch.
 
 Can deal with animation (via the Shape Keys), textures and md3 tags (added as Empty objects).
 
