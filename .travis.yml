@@ -16,4 +16,14 @@ install:
   - mv blender-* blender
   - pip install pytest
 script:
-  - 'blender/blender --factory-startup -noaudio --background --python-exit-code 1 --python-expr "import pytest; pytest.main([])"'
+  - >
+    blender/blender
+    --factory-startup
+    -noaudio
+    --background
+    --python-exit-code 1
+    --python-expr
+    "import sys;
+    sys.path.extend($(python -c "import sys; print(repr(sys.path))"));
+    import pytest;
+    pytest.main([])"
