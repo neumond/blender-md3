@@ -14,5 +14,6 @@ matrix:
 install:
   - wget -O - ${BLENDER_TAR} | tar -jxf -
   - mv blender-* blender
+  - pip install pytest
 script:
-  - 'blender/blender --factory-startup -noaudio --background --python-expr "import pytest; pytest.main([])"'
+  - 'blender/blender --factory-startup -noaudio --background --python-exit-code 1 --python-expr "import pytest; pytest.main([])"'
