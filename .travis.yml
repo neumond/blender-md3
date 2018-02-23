@@ -17,14 +17,22 @@ before_install:
 install:
   - pip install pytest
 script:
+  # This is workaround for older versions of blender (<=2.72)
+  # In newer versions it's best to use:
+  #
+  # --python-exit-code 1
+  # --python-expr
+  # "import sys;
+  # sys.path.extend($(python -c "import sys; print(repr(sys.path))"));
+  # import pytest;
+  # pytest.main([])"
   - >
     blender/blender
     --factory-startup
     -noaudio
     --background
-    --python-exit-code 1
-    --python-expr
-    "import sys;
-    sys.path.extend($(python -c "import sys; print(repr(sys.path))"));
-    import pytest;
-    pytest.main([])"
+    --python run_tests.py
+    --
+    "$(python -c "import sys; print(repr(sys.path))")"
+    &&
+    exit $(cat result.txt)
