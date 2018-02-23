@@ -15,6 +15,7 @@ before_install:
   - wget -O - ${BLENDER_TAR} | tar -jxf -
   - mv blender-* blender
 install:
+  - 'if [[ "$TRAVIS_PYTHON_VERSION" == "3.3" ]]; then pip install pathlib; fi'
   - pip install pytest
 script:
   # This is workaround for older versions of blender (<=2.72)
