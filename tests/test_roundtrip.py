@@ -1,5 +1,6 @@
 from contextlib import contextmanager
-
+from PIL import Image, ImageChops
+from math import sqrt
 import bpy
 from io_scene_md3.export_md3 import MD3Exporter
 from io_scene_md3.import_md3 import MD3Importer
@@ -18,10 +19,30 @@ def use_scene(scene):
     bpy.context.screen.scene = old_scene
 
 
+def rmsdiff(im1, im2):
+    "Calculate the root-mean-square difference between two images"
+    h = ImageChops.difference(im1, im2).histogram()
+    return sqrt(
+        sum(map(lambda h, i: h*(i**2), h, range(256)))
+        /
+        (im1.size[0] * im1.size[1])
+    )
+
+
+def compare_images(a, b):
+    img_a = Image.open(str(a))
+    img_b = Image.open(str(b))
+    assert img_a.size == img_b.size
+    assert rmsdiff(img_a, img_b) < 10
+
+
 def test_render(testdir, tmpdir):
+    img_a = testdir / 'a.png'
+    img_b = testdir / 'b.png'
+
     bpy.ops.wm.open_mainfile(filepath=str(testdir / 'simple.blend'))
 
-    render_to_file(testdir / 't1.png')
+    render_to_file(img_a)
 
     old_scene = bpy.context.scene
 
@@ -47,4 +68,6 @@ def test_render(testdir, tmpdir):
     new_scene.camera = old_scene.camera
     new_scene.world = old_scene.world
 
-    render_to_file(testdir / 't2.png')
+    render_to_file(img_b)
+
+    compare_images(img_a, img_b)

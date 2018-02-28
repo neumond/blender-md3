@@ -88,7 +88,6 @@ class MD3Importer:
         data = self.unpack(fmt.Vertex)
         self.verts[i].co = mathutils.Vector((data.x, data.y, data.z))
         # ignoring data.normal here
-        # read_surface_normals reads them as a separate step
 
     def read_surface_normals(self, i):
         data = self.unpack(fmt.Vertex)
@@ -161,15 +160,8 @@ class MD3Importer:
         self.verts = self.mesh.vertices
         self.read_n_items(data.nVerts, start_pos + data.offVerts, self.read_surface_vert)
 
-        # self.mesh.update(calc_edges=False)
-        self.mesh.calc_normals()
         self.mesh.validate()
-
-        # separate step for normals. update() causes recalculation
-        # TODO:
-        # Switching to edit mode erases imported normals
-        # may be delete it completely?
-        # self.read_n_items(data.nVerts, start_pos + data.offVerts, self.read_surface_normals)
+        self.mesh.calc_normals()
 
         self.material = bpy.data.materials.new('Main')
         self.mesh.materials.append(self.material)

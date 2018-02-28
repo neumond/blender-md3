@@ -14,6 +14,7 @@ before_install:
   - mv blender-* blender
 install:
   - pip install pytest
+  - pip install Pillow
 script:
   # This is workaround for older versions of blender (<=2.72)
   # In newer versions it's best to use:
