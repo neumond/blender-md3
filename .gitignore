@@ -1,7 +1,8 @@
 *.pyc
 __pycache__/
 *.md3
-*.blend*
+/*.blend*
+/tests/*.blend?*
 *.png
 /*.zip
 /models/
