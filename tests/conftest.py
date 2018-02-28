@@ -8,3 +8,8 @@ import pytest
 def tmpdir():
     with TemporaryDirectory() as d:
         yield Path(d)
+
+
+@pytest.fixture
+def testdir():
+    return Path(__file__).parent

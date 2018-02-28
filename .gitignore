@@ -1,7 +1,8 @@
 *.pyc
 __pycache__/
-/*.md3
-/*.blend*
+*.md3
+*.blend*
+*.png
 /*.zip
 /models/
 /bugs/
