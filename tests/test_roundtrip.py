@@ -1,7 +1,10 @@
 from contextlib import contextmanager
-from PIL import Image, ImageChops
 from math import sqrt
+
+from PIL import Image, ImageChops
+
 import bpy
+
 from io_scene_md3.export_md3 import MD3Exporter
 from io_scene_md3.import_md3 import MD3Importer
 
@@ -25,7 +28,7 @@ def rmsdiff(im1, im2):
     return sqrt(
         sum(map(lambda h, i: h*(i**2), h, range(256)))
         /
-        (im1.size[0] * im1.size[1])
+        (im1.size[0] * im1.size[1]),
     )
 
 
@@ -36,11 +39,9 @@ def compare_images(a, b):
     assert rmsdiff(img_a, img_b) < 10
 
 
-def test_render(testdir, tmpdir):
+def test_render(testdir, tmpdir, simple_blend):
     img_a = testdir / 'a.png'
     img_b = testdir / 'b.png'
-
-    bpy.ops.wm.open_mainfile(filepath=str(testdir / 'simple.blend'))
 
     render_to_file(img_a)
 
