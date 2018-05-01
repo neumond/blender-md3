@@ -3,15 +3,15 @@
 # TODO: check bounding sphere calculation
 
 
-import bpy
-import mathutils
-from math import sqrt
 import re
 from collections import defaultdict
+from math import sqrt
+
+import bpy
+import mathutils
 
 from . import fmt_md3 as fmt
 from .utils import OffsetBytesIO
-
 
 nums = re.compile(r'\.\d{3}$')
 
@@ -59,7 +59,7 @@ def gather_vertices(mesh, uvmap_data=None):
         key = (
             loop.vertex_index,
             tuple(loop.normal),
-            None if uvmap_data is None else tuple(uvmap_data[i].uv)
+            None if uvmap_data is None else tuple(uvmap_data[i].uv),
         )
         md3id = index.get(key, None)
         if md3id is None:
@@ -242,7 +242,7 @@ class MD3Exporter:
             nShaders=nShaders,
             nVerts=nVerts,
             nTris=nTris,
-            **f.getoffsets()
+            **f.getoffsets(),
         ) + f.getvalue()
 
     def get_frame_data(self, i):
@@ -275,7 +275,7 @@ class MD3Exporter:
         return fmt.Frame.pack(
             localOrigin=(0.0, 0.0, 0.0),
             name='',  # frame name, ignored, TODO:
-            **self.get_frame_data(i)
+            **self.get_frame_data(i),
         )
 
     def __call__(self, filename):
@@ -296,7 +296,7 @@ class MD3Exporter:
         frames_bin = [self.pack_frame(i) for i in range(self.nFrames)]
 
         if len(surfaces_bin) == 0:
-            raise ValueError("At least one surface mesh must be visible in order to export.")
+            print("WARNING: There're no visible surfaces to export")
 
         f = OffsetBytesIO(start_offset=fmt.Header.size)
         f.mark('offFrames')
@@ -317,7 +317,7 @@ class MD3Exporter:
                 nTags=len(self.tagNames),
                 nSurfaces=len(surfaces_bin),
                 nSkins=0,  # count of skins, ignored
-                **f.getoffsets()
+                **f.getoffsets(),
             ))
             file.write(f.getvalue())
             print('nFrames={} nSurfaces={}'.format(self.nFrames, len(surfaces_bin)))

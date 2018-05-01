@@ -18,5 +18,12 @@ def testdir():
 
 
 @pytest.fixture
-def simple_blend(testdir):
-    bpy.ops.wm.open_mainfile(filepath=str(testdir / 'simple.blend'))
+def blend_opener(testdir):
+    def blend_opener(fname):
+        bpy.ops.wm.open_mainfile(filepath=str(testdir / fname))
+    return blend_opener
+
+
+@pytest.fixture
+def simple_blend(blend_opener):
+    blend_opener('simple.blend')
