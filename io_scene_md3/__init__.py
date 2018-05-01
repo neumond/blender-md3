@@ -1,7 +1,7 @@
 bl_info = {
     "name": "Quake 3 Model (.md3)",
     "author": "Vitaly Verhovodov",
-    "version": (0, 2, 0),
+    "version": (0, 2, 1),
     "blender": (2, 72, 0),
     "location": "File > Import-Export > Quake 3 Model",
     "description": "Quake 3 Model format (.md3)",
@@ -48,6 +48,7 @@ class ExportMD3(bpy.types.Operator, ExportHelper):
         except ValueError as e:
             self.report({'ERROR'}, str(e))
         return {'CANCELLED'}
+
 
 def menu_func_import(self, context):
     self.layout.operator(ImportMD3.bl_idname, text="Quake 3 Model (.md3)")
