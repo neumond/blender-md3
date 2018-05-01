@@ -242,7 +242,7 @@ class MD3Exporter:
             nShaders=nShaders,
             nVerts=nVerts,
             nTris=nTris,
-            **f.getoffsets(),
+            **f.getoffsets()
         ) + f.getvalue()
 
     def get_frame_data(self, i):
@@ -275,7 +275,7 @@ class MD3Exporter:
         return fmt.Frame.pack(
             localOrigin=(0.0, 0.0, 0.0),
             name='',  # frame name, ignored, TODO:
-            **self.get_frame_data(i),
+            **self.get_frame_data(i)
         )
 
     def __call__(self, filename):
@@ -317,7 +317,7 @@ class MD3Exporter:
                 nTags=len(self.tagNames),
                 nSurfaces=len(surfaces_bin),
                 nSkins=0,  # count of skins, ignored
-                **f.getoffsets(),
+                **f.getoffsets()
             ))
             file.write(f.getvalue())
             print('nFrames={} nSurfaces={}'.format(self.nFrames, len(surfaces_bin)))
